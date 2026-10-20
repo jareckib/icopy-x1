@@ -274,6 +274,10 @@ class T55xxMultiwriterPlugin(object):
             self.host.set_var('error_msg', 'Invalid length.\nMust be exactly 10 hex (EM4102).')
             return {'status': 'error'}
 
+        if int(uid, 16) == 0:
+            self.host.set_var('error_msg', 'ID cannot be all zeros.')
+            return {'status': 'error'}
+
         return self._store_uid(uid)
 
     # -- Read original fob ------------------------------------------------
@@ -404,6 +408,20 @@ class T55xxMultiwriterPlugin(object):
                 self.host.set_var('error_msg', 'Block {} mismatch.\nExpected: {}\nFound: {}'.format(i, expected, found or 'N/A'))
                 return {'status': 'failed'}
 
+        return {'status': 'ok'}
+
+    def do_cancel_write(self):
+        """Declined to write to the T5577. If the collection was full
+        (3/3), clear it so DEC/HEX entry and Read EM start fresh from
+        the menu - otherwise menu/input_dec/input_hex have no route
+        forward, since _store_uid() returns status 'full' once 3 UIDs
+        are already stored and none of those screens handle that
+        status. A partial (1-2 UID) collection is left as-is so the
+        user can keep adding to it."""
+        self.host.set_var('error_msg', '')
+        if len(self._get_uid_list()) >= 3:
+            self._clear_uids()
+            self.host.set_var('last_uid', '')
         return {'status': 'ok'}
 
     def do_remove_last(self):
