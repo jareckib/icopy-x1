@@ -179,9 +179,13 @@
                 "buttons": {"left": "Back", "right": "Write"},
                 "keys": {
                     "OK":  "set_state:place_tag",
-                    "M1":  "set_state:menu",
+                    "M1":  "run:do_cancel_write",
                     "M2":  "set_state:place_tag"
                 }
+            },
+            "transitions": {
+                "on_result.status==ok": "menu",
+                "on_error":             "menu"
             }
         },
 
@@ -201,12 +205,13 @@
                 "buttons": {"left": "Back", "right": "Write"},
                 "keys": {
                     "OK":  "run:do_write",
-                    "M1":  "set_state:menu",
+                    "M1":  "run:do_cancel_write",
                     "M2":  "run:do_write"
                 }
             },
             "transitions": {
                 "on_result.status==done":  "verifying",
+                "on_result.status==ok":    "menu",
                 "on_result.status==error": "write_error",
                 "on_error":                "write_error"
             }
@@ -276,9 +281,13 @@
                 "buttons": {"left": "Back", "right": "Retry"},
                 "keys": {
                     "OK":  "set_state:place_tag",
-                    "M1":  "set_state:menu",
+                    "M1":  "run:do_cancel_write",
                     "M2":  "set_state:place_tag"
                 }
+            },
+            "transitions": {
+                "on_result.status==ok": "menu",
+                "on_error":             "menu"
             }
         },
 
