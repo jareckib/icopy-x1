@@ -89,7 +89,6 @@ CHARSET_NAMES = ('ABC', 'abc', '123', '#$%')
 LABEL_COLOR = '#000000'
 VALUE_COLOR = '#0000FF'
 DEFAULT_TEXT_COLOR = VALUE_COLOR
-CURSOR_COLOR = '#0000FF'
 HINT_COLOR = '#606060'
 
 TAG = '_txt_input'
@@ -239,7 +238,7 @@ class FreeTextInput(object):
             if i == self._cursor:
                 canvas.create_line(
                     x0, y1 + 2, x1, y1 + 2,
-                    fill=CURSOR_COLOR,
+                    fill=self._text_color,
                     width=2,
                     tags=TAG,
                 )
