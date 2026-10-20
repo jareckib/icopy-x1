@@ -74,7 +74,6 @@ from lib import resources
 LABEL_COLOR = '#000000'
 DIGIT_COLOR = '#0000FF'
 DEFAULT_TEXT_COLOR = DIGIT_COLOR
-CURSOR_COLOR = '#0000FF'
 HINT_COLOR = '#606060'
 
 TAG = '_dec_input'
@@ -171,7 +170,7 @@ class FreeDecInput(object):
             if i == self._cursor:
                 canvas.create_line(
                     x0, y1 + 2, x1, y1 + 2,
-                    fill=CURSOR_COLOR, width=2, tags=TAG,
+                    fill=self._text_color, width=2, tags=TAG,
                 )
             x = x1
 
