@@ -1,23 +1,24 @@
 ##########################################################################
-# Required Notice: Copyright ETOILE401 SAS (http://www.lab401.com)
+# Required Notice: Copyright ETOILE401 SAS (http://lab401.com)
 #
-# Copyright (c) 2026: ETOILE401 SAS & https://github.com/quantum-x/
+# Copyright (c) 2026: ETOILE401 SAS & https://github.com
+# 
 #
 # This software is licensed under the PolyForm Noncommercial License 1.0.0.
 # You may not use this software for commercial purposes.
 #
 # A copy of the license is available at:
-# https://polyformproject.org/licenses/noncommercial/1.0.0
+# https://polyformproject.org
 #
 # This entire header "Required Notice" must remain in place.
 ##########################################################################
-"""
-EM4102 From Decimal plugin for iCopy-XS (author jareckib- Jarek Barwinski)
+
+"""EM4102 From Decimal plugin for iCopy-XS
 
 Useful for recovering damaged tags that cannot be read by iCopy-X 
 but still have a visible engraved ID number.
 The plugin converts it to a hex UID, encodes EM4102 and clones to T5577.
-
+Copyright (c) 2026: jareckib
 """
 
 import re
@@ -35,16 +36,14 @@ def dec_to_hex_uid(dec_str):
     return '{:010X}'.format(int(dec_str))
 
 def _extract_em410x_id(output):
-    """Pull the 10-hex-digit ID out of 'lf em 410x reader' output, e.g.
-    '[+] EM 410x ID 0000003039'. Returns None if no tag was read."""
+    """Pull the 10-hex-digit ID out of 'lf em 410x reader' output."""
     if not output:
         return None
-    m = re.search(r'EM 410x ID\s+([0-9A-Fa-f]{10})\b', output, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
+    for line in output.splitlines():
+        m = re.search(r'\bEM\s*410x\s*ID\s*([0-9A-Fa-f]{10})\b', line, re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
     return None
-
-
 class Em4102DecPlugin(object):
 
     def __init__(self, host=None):
@@ -60,8 +59,6 @@ class Em4102DecPlugin(object):
         self.host.set_var('hex_uid', '')
         self.host.set_var('clone_count', '0')
         return {'status': 'ok'}
-
-    # ---------- enter_dec screen: free-growing digit widget (call:) ----------
 
     def show_dec_input(self):
         canvas = self.host.getCanvas()
@@ -88,6 +85,12 @@ class Em4102DecPlugin(object):
         if self._dec is not None:
             self._dec.moveRight()
 
+    def dec_back_cleanse(self):
+        if self._dec is not None:
+            self._dec.hide()
+            self._dec = None
+        return {'status': 'ok'}
+
     def do_capture_dec(self):
         self.host.set_var('error_msg', '')
         dec = self._dec.getValue() if self._dec is not None else ''
@@ -104,6 +107,10 @@ class Em4102DecPlugin(object):
         if uid is None:
             self.host.set_var('error_msg', 'Conversion failed.')
             return {'status': 'error'}
+
+        if self._dec is not None:
+            self._dec.hide()
+            self._dec = None
 
         self.host.set_var('dec_id', dec)
         self.host.set_var('hex_uid', uid)
