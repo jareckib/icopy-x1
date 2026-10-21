@@ -395,7 +395,6 @@ class T55xxMultiwriterPlugin(object):
             # The tag was removed, causing PM3 to hang. 
             # Send a hardware reset command to clear the communication buffer.
             self._pm3('hw reset', 2000) 
-            # Alternative option: self._pm3('hw tune', 2000) to retune the antenna
             # ────────────────────────────────────────────────────────────────
             self.host.set_var('error_msg', 'Verification failed.\nCannot dump T5577 data.\nPM3 recovered, try again.')
             return {'status': 'failed'}
