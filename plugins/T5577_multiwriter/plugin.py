@@ -1,13 +1,14 @@
 ##########################################################################
 # Required Notice: Copyright ETOILE401 SAS (http://www.lab401.com)
 #
-# Copyright (c) 2026: ETOILE401 SAS & https://github.com/quantum-x/
+# Copyright (c) 2026: ETOILE401 SAS & https://github.com
+# 
 #
 # This software is licensed under the PolyForm Noncommercial License 1.0.0.
 # You may not use this software for commercial purposes.
 #
 # A copy of the license is available at:
-# https://polyformproject.org/licenses/noncommercial/1.0.0
+# https://polyformproject.org
 #
 # This entire header "Required Notice" must remain in place.
 ##########################################################################
@@ -29,10 +30,9 @@ import re
 from lib.input_dec import FreeDecInput
 from lib.input_hex import FreeHexInput
 
-# OPERATIONAL TIMEOUTS SET TO MAINTAIN RIGOROUS COMMUNICATION INTEGRITY
-TIMEOUT_READ  = 8000   # Read operation limit set to 8000 ms to capture deep block responses
-TIMEOUT_WRITE = 8000   # Write operation execution window set to 8000 ms
-TIMEOUT_DET   = 6000   # Low frequency tag detection window set to 6000 ms
+TIMEOUT_READ  = 10000
+TIMEOUT_WRITE = 8000
+TIMEOUT_DET   = 6000
 
 BLOCK0 = {1: '00148040', 2: '00148080', 3: '001480C0'}
 
@@ -94,6 +94,8 @@ def dec_to_hex_uid(dec_str):
     if not re.match(r'^\d{1,10}$', dec_str):
         return None
     return '{:010X}'.format(int(dec_str))
+
+
 # ---------------------------------------------------------------------------
 # PM3 output parsers
 # ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ def _parse_block(output, block_num):
     """Extract block N value from 'lf t55xx dump' output."""
     if not output:
         return None
+    # match e.g. "[+]  0 | 00148040" or "  0 | 00148040"
     pattern = r'\[\s*\+\s*\]\s*{:02X}\s*\|\s*([0-9A-Fa-f]{{8}})'.format(block_num)
     m = re.search(pattern, output, re.IGNORECASE)
     if m:
@@ -135,6 +138,16 @@ class T55xxMultiwriterPlugin(object):
         self._hex = None
 
     # -- helpers ----------------------------------------------------------
+
+    def _tr(self, text):
+        """Translate a display string when the host provides translations."""
+        translate = getattr(self.host, 'tr', None)
+        if callable(translate):
+            try:
+                return translate(text)
+            except Exception:
+                pass
+        return text
 
     def _pm3(self, cmd, timeout=TIMEOUT_WRITE):
         return self.host.pm3_command(cmd, timeout=timeout)
@@ -159,11 +172,15 @@ class T55xxMultiwriterPlugin(object):
     def _update_uid_count(self):
         count = len(self._get_uid_list())
         self.host.set_var('uid_count', str(count))
-        self.host.set_var('uid_count_label', '{} UID{} stored'.format(count, 's' if count != 1 else ''))
+        if count == 1:
+            self.host.set_var('uid_count_label', self._tr('{} UID stored').format(count))
+        else:
+            self.host.set_var('uid_count_label', self._tr('{} UIDs stored').format(count))
+        # Summary
         lines = []
         for i, uid in enumerate(self._get_uid_list(), 1):
-            lines.append('UID{}: {}'.format(i, uid))
-        self.host.set_var('uid_summary', '\n'.join(lines) if lines else 'No UIDs yet')
+            lines.append(self._tr('UID{}: {}').format(i, uid))
+        self.host.set_var('uid_summary', '\n'.join(lines) if lines else self._tr('No UIDs yet'))
         return count
 
     # -- Initialization ----------------------------------------------------
@@ -173,8 +190,8 @@ class T55xxMultiwriterPlugin(object):
         self.host.set_var('error_msg', '')
         self.host.set_var('last_uid', '')
         self.host.set_var('written_count', '0')
-        self.host.set_var('uid_summary', 'No UIDs yet')
-        self.host.set_var('uid_count_label', '0 UIDs stored')
+        self.host.set_var('uid_summary', self._tr('No UIDs yet'))
+        self.host.set_var('uid_count_label', self._tr('0 UIDs stored'))
         self.host.set_var('input_mode', '')
         self._dec = None
         self._hex = None
@@ -185,8 +202,8 @@ class T55xxMultiwriterPlugin(object):
     def show_dec_input(self):
         canvas = self.host.getCanvas()
         self._dec = FreeDecInput(
-            canvas, label='INPUT DEC:',
-            hint='Up/Down digit   Left/Right move',
+            canvas, label=self._tr('INPUT DEC:'),
+            hint=self._tr('Up/Down digit   Left/Right move'),
             max_length=10,
         )
         self._dec.show()
@@ -213,26 +230,28 @@ class T55xxMultiwriterPlugin(object):
         dec = self._dec.getValue() if self._dec is not None else ''
 
         if not dec:
-            self.host.set_var('error_msg', 'Enter a digit.')
+            self.host.set_var('error_msg', self._tr('Enter a digit.'))
             return {'status': 'error'}
 
         if int(dec) == 0:
-            self.host.set_var('error_msg', 'ID cannot be all zeros.')
+            self.host.set_var('error_msg', self._tr('ID cannot be all zeros.'))
             return {'status': 'error'}
 
         uid = dec_to_hex_uid(dec)
         if uid is None:
-            self.host.set_var('error_msg', 'Conversion failed.')
+            self.host.set_var('error_msg', self._tr('Conversion failed.'))
             return {'status': 'error'}
 
         return self._store_uid(uid)
+
     # -- HEX input (fixed 10 hex) ----------------------------------------
 
     def show_hex_input(self):
         canvas = self.host.getCanvas()
+        # Force exactly 10 hex characters for EM4102
         self._hex = FreeHexInput(
-            canvas, label='INPUT HEX:',
-            hint='Up/Down digit   Left/Right move',
+            canvas, label=self._tr('INPUT HEX:'),
+            hint=self._tr('Up/Down digit   Left/Right move'),
             max_length=10,
             per_line=10,
         )
@@ -259,16 +278,17 @@ class T55xxMultiwriterPlugin(object):
         self.host.set_var('error_msg', '')
         val = self._hex.getValue() if self._hex is not None else ''
         if not val:
-            self.host.set_var('error_msg', 'Enter hex characters.')
+            self.host.set_var('error_msg', self._tr('Enter hex characters.'))
             return {'status': 'error'}
 
         uid = val.upper()
+        # Enforce exact 10-hex length for EM4102
         if not re.match(r'^[0-9A-F]{10}$', uid):
-            self.host.set_var('error_msg', 'Invalid length.\nMust be exactly 10 hex (EM4102).')
+            self.host.set_var('error_msg', self._tr('Invalid length.\nMust be exactly 10 hex (EM4102).'))
             return {'status': 'error'}
 
         if int(uid, 16) == 0:
-            self.host.set_var('error_msg', 'ID cannot be all zeros.')
+            self.host.set_var('error_msg', self._tr('UID cannot be all zeros.'))
             return {'status': 'error'}
 
         return self._store_uid(uid)
@@ -278,30 +298,16 @@ class T55xxMultiwriterPlugin(object):
     def do_read_fob(self):
         """Read UID from the original fob via PM3."""
         self.host.set_var('error_msg', '')
-        # Main fob reading sequence uses a dedicated 6000 ms timeout for optimal antenna scanning stability
-        ok, out = self._pm3('lf em 410x reader', 6000)
-
-        if not ok:
-            self.host.set_var('error_msg', 'PM3 command failed.\nCheck device connection and retry.')
-            return {'status': 'error'}
-
+        ok, out = self._pm3('lf em 410x reader', TIMEOUT_READ)
         uid = _parse_em410x_id(out) if out else None
 
         if not uid:
-            self.host.set_var('error_msg', 'No EM410x tag detected.\nAdjust position and retry.')
+            self.host.set_var('error_msg', self._tr('No EM410x tag detected.\nAdjust position and retry.'))
             return {'status': 'error'}
 
-        if len(uid) != 10:
-            if re.match(r'^[0-9A-F]{10,16}$', uid):
-                uid10 = uid[-10:]
-                if _hex_to_bin40(uid10):
-                    uid = uid10
-                else:
-                    self.host.set_var('error_msg', 'Read UID has unsupported length.\nExpected 10 hex.')
-                    return {'status': 'error'}
-            else:
-                self.host.set_var('error_msg', 'Read UID has unsupported format.')
-                return {'status': 'error'}
+        if not re.fullmatch(r'[0-9A-F]{10}', uid):
+            self.host.set_var('error_msg', self._tr('Read UID has unsupported length or format.\nExpected exactly 10 hex (EM4102).'))
+            return {'status': 'error'}
 
         return self._store_uid(uid)
 
@@ -309,15 +315,27 @@ class T55xxMultiwriterPlugin(object):
         """Save the UID into the next available slot."""
         uids = self._get_uid_list()
         if len(uids) >= 3:
-            self.host.set_var('error_msg', 'Maximum 3 UIDs reached.')
+            self.host.set_var('error_msg', self._tr('Maximum 3 UIDs reached.'))
             return {'status': 'full'}
 
+        # Encode and verify
         result = encode_uid(uid)
         if result is None:
-            self.host.set_var('error_msg', 'Encoding failed for:\n{}'.format(uid))
+            self.host.set_var('error_msg', self._tr('Encoding failed for:\n{}').format(uid))
             return {'status': 'error'}
 
-        idx = len(uids) + 1
+        # Store in the first empty slot. This also keeps the slot index correct
+        # if the state was left partially populated after navigating Back.
+        idx = None
+        for slot in range(1, 4):
+            if not self.host.get_var('uid{}'.format(slot), ''):
+                idx = slot
+                break
+
+        if idx is None:
+            self.host.set_var('error_msg', self._tr('Maximum 3 UIDs reached.'))
+            return {'status': 'full'}
+
         self._set_uid(idx, uid)
         count = self._update_uid_count()
         self.host.set_var('last_uid', uid)
@@ -335,14 +353,15 @@ class T55xxMultiwriterPlugin(object):
         uids = self._get_uid_list()
 
         if not uids:
-            self.host.set_var('error_msg', 'No UIDs to write.')
+            self.host.set_var('error_msg', self._tr('No UIDs to write.'))
             return {'status': 'error'}
 
+        # Encode all UIDs
         all_blocks = []
         for uid in uids:
             result = encode_uid(uid)
             if result is None:
-                self.host.set_var('error_msg', 'Encoding failed for:\n{}'.format(uid))
+                self.host.set_var('error_msg', self._tr('Encoding failed for:\n{}').format(uid))
                 return {'status': 'error'}
 
             blk_a, blk_b = result
@@ -353,15 +372,17 @@ class T55xxMultiwriterPlugin(object):
 
         ok, _ = self._pm3('lf t55xx write -b 0 -d {}'.format(block0), TIMEOUT_WRITE)
         if not ok:
-            self.host.set_var('error_msg', 'Write failed on block 0.\nCheck tag position.')
+            self.host.set_var('error_msg', self._tr('Write failed on block 0.\nCheck tag position.'))
             return {'status': 'error'}
 
+        # Write data blocks using short flags
         for i, blk in enumerate(all_blocks, 1):
             ok, _ = self._pm3('lf t55xx write -b {} -d {}'.format(i, blk), TIMEOUT_WRITE)
             if not ok:
-                self.host.set_var('error_msg', 'Write failed on block {}.\nCheck tag position.'.format(i))
+                self.host.set_var('error_msg', self._tr('Write failed on block {}.\nCheck tag position.').format(i))
                 return {'status': 'error'}
 
+        # Save to state for verification
         self.host.set_var('written_block0', block0)
         for i, blk in enumerate(all_blocks, 1):
             self.host.set_var('written_block{}'.format(i), blk)
@@ -377,64 +398,74 @@ class T55xxMultiwriterPlugin(object):
         n = int(self.host.get_var('written_count', '0'))
 
         if not block0 or n == 0:
-            self.host.set_var('error_msg', 'No write data to verify.')
+            self.host.set_var('error_msg', self._tr('No write data to verify.'))
             return {'status': 'error'}
 
-        # Target explicit detection call utilizing the 6000 ms operational timeout
-        self._pm3('lf t55xx detect', TIMEOUT_DET)
+        # Require a successful detect before attempting the dump. Do not claim
+        # that the reader is ready when the device did not acknowledge detection.
+        detect_ok, detect_output = self._pm3('lf t55xx detect', TIMEOUT_DET)
+        if not detect_ok:
+            self.host.set_var('error_msg', self._tr('Verification failed.\nT5577 detection command failed.'))
+            return {'status': 'failed'}
 
-        # Execute dump command matching the robust 8000 ms transmission window
         ok, all_output = self._pm3('lf t55xx dump', TIMEOUT_READ)
         if not ok or not all_output:
-            # Injecting pure break signal to terminate the FPGA radio loop safely
-            self._pm3('lf', 500)
-            self.host.set_var('error_msg', 'Verification failed.\nCannot dump T5577 data.\nReader ready, try again.')
+            self.host.set_var('error_msg', self._tr('Verification failed.\nCannot dump T5577 data.'))
             return {'status': 'failed'}
 
+        # Check block 0
         found0 = _parse_block(all_output, 0)
         if not found0 or found0.upper() != block0.upper():
-            self._pm3('lf', 500)
-            self.host.set_var('error_msg', 'Block 0 mismatch.\nExpected: {}\nFound: {}'.format(block0, found0 or 'N/A'))
+            self.host.set_var('error_msg', self._tr('Block 0 mismatch.\nExpected: {}\nFound: {}').format(block0, found0 or 'N/A'))
             return {'status': 'failed'}
 
+        # Check data blocks
         for i in range(1, n + 1):
             expected = self.host.get_var('written_block{}'.format(i), '')
             found = _parse_block(all_output, i)
             if not found or found.upper() != expected.upper():
-                self._pm3('lf', 500)
-                self.host.set_var('error_msg', 'Block {} mismatch.\nExpected: {}\nFound: {}'.format(i, expected, found or 'N/A'))
+                self.host.set_var('error_msg', self._tr('Block {} mismatch.\nExpected: {}\nFound: {}').format(i, expected, found or 'N/A'))
                 return {'status': 'failed'}
 
         return {'status': 'ok'}
 
     def do_cancel_write(self):
-        """Declined to write to the T5577. Returns to main menu."""
+        """Cancel the current write attempt without deleting the UID list."""
         self.host.set_var('error_msg', '')
-        self._pm3('lf', 500)
-
-        if len(self._get_uid_list()) >= 3:
-            self._clear_uids()
-            self.host.set_var('last_uid', '')
-        return {'status': 'ok'}
-
-    def do_abandon_verify(self):
-        """Back from verify_fail screen. Clears everything to start fresh."""
-        self.host.set_var('error_msg', '')
-        
-        # Preemptively clear the antenna state and flush the CDC interface registers
-        self._pm3('lf', 500)
-        
-        # Clearing the collection to reset the multiwrite process flow
-        self._clear_uids()
-        self.host.set_var('last_uid', '')
-        return {'status': 'ok'}
+        # Invalidate verification data from the failed/abandoned attempt.
+        self.host.set_var('written_count', '0')
+        self.host.set_var('written_block0', '')
+        for i in range(1, 7):
+            self.host.set_var('written_block{}'.format(i), '')
+        count = self._update_uid_count()
+        if count >= 3:
+            return {'status': 'stored_full'}
+        if count > 0:
+            return {'status': 'stored_more'}
+        return {'status': 'empty'}
 
     def do_remove_last(self):
-        """Remove the last added UID."""
+        """Remove the last UID and return the state matching the remaining list."""
+        self.host.set_var('error_msg', '')
         uids = self._get_uid_list()
         if not uids:
-            self.host.set_var('error_msg', 'No UIDs to remove.')
+            self.host.set_var('error_msg', self._tr('No UIDs to remove.'))
+            self._update_uid_count()
             return {'status': 'empty'}
+
+        # UIDs are stored sequentially, so removing the last item leaves no gaps.
         self.host.set_var('uid{}'.format(len(uids)), '')
-        self._update_uid_count()
-        return {'status': 'ok'}
+        count = self._update_uid_count()
+
+        # A previous write/verification no longer represents the current UID list.
+        self.host.set_var('written_count', '0')
+        self.host.set_var('written_block0', '')
+        for i in range(1, 7):
+            self.host.set_var('written_block{}'.format(i), '')
+
+        if count == 0:
+            self.host.set_var('last_uid', '')
+            return {'status': 'empty'}
+        if count >= 3:
+            return {'status': 'stored_full'}
+        return {'status': 'stored_more'}
