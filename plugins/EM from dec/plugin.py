@@ -39,7 +39,7 @@ def _extract_em410x_id(output):
     '[+] EM 410x ID 0000003039'. Returns None if no tag was read."""
     if not output:
         return None
-    m = re.search(r'EM 410x ID\s+([0-9A-Fa-f]{10})', output, re.IGNORECASE)
+    m = re.search(r'EM 410x ID\s+([0-9A-Fa-f]{10})\b', output, re.IGNORECASE)
     if m:
         return m.group(1).upper()
     return None
