@@ -3,9 +3,7 @@
     "name": "T5577 Multiwriter",
     "version": "1.0.0",
     "initial_state": "init",
-
     "states": {
-
         "init": {
             "on_enter": "run:do_init",
             "screen": {
@@ -21,10 +19,9 @@
             },
             "transitions": {
                 "on_result.status==ok": "menu",
-                "on_error":             "menu"
+                "on_error": "menu"
             }
         },
-
         "menu": {
             "screen": {
                 "title": "T5577 Multiwriter",
@@ -35,26 +32,24 @@
                         {"text": "Add UID in HEX, DEC", "size": "large", "align": "center"},
                         {"text": "or Read EM", "size": "large", "align": "center"},
                         {"text": ""},
-                        {"text": "OK - Read EM (original", "size": "medium"},
-                        {"text": "     fob)", "size": "medium"}
+                        {"text": "OK - Read original fob", "size": "medium"}
                     ]
                 },
                 "buttons": {"left": "DEC", "right": "HEX"},
                 "keys": {
-                    "OK":  "run:do_read_fob",
-                    "M1":  "set_state:input_dec",
-                    "M2":  "set_state:input_hex"
+                    "OK": "run:do_read_fob",
+                    "M1": "set_state:input_dec",
+                    "M2": "set_state:input_hex"
                 }
             },
             "transitions": {
                 "on_result.status==stored_more": "uid_added",
                 "on_result.status==stored_full": "uid_added_full",
-                "on_result.status==empty":      "menu",
-                "on_result.status==error":      "input_method_error",
-                "on_error":                     "input_method_error"
+                "on_result.status==empty": "menu",
+                "on_result.status==error": "input_method_error",
+                "on_error": "input_method_error"
             }
         },
-
         "add_uid_method": {
             "screen": {
                 "title": "Add UID",
@@ -65,24 +60,23 @@
                         {"text": ""},
                         {"text": "Choose input method", "size": "large", "align": "center"},
                         {"text": ""},
-                        {"text": "OK  - Read EM",      "size": "medium", "align": "center"}
+                        {"text": "OK  - Read EM", "size": "medium", "align": "center"}
                     ]
                 },
                 "buttons": {"left": "DEC", "right": "HEX"},
                 "keys": {
-                    "OK":  "run:do_read_fob",
-                    "M1":  "set_state:input_dec",
-                    "M2":  "set_state:input_hex"
+                    "OK": "run:do_read_fob",
+                    "M1": "set_state:input_dec",
+                    "M2": "set_state:input_hex"
                 }
             },
             "transitions": {
                 "on_result.status==stored_more": "uid_added",
                 "on_result.status==stored_full": "uid_added_full",
-                "on_result.status==error":       "input_method_error",
-                "on_error":                      "input_method_error"
+                "on_result.status==error": "input_method_error",
+                "on_error": "input_method_error"
             }
         },
-
         "input_hex": {
             "on_enter": "call:show_hex_input",
             "screen": {
@@ -93,23 +87,22 @@
                 },
                 "buttons": {"left": "Back", "right": "OK"},
                 "keys": {
-                    "UP":    "call:hex_roll_up",
-                    "DOWN":  "call:hex_roll_down",
-                    "LEFT":  "call:hex_move_left",
+                    "UP": "call:hex_roll_up",
+                    "DOWN": "call:hex_roll_down",
+                    "LEFT": "call:hex_move_left",
                     "RIGHT": "call:hex_move_right",
-                    "OK":    "run:do_capture_hex",
-                    "M2":    "run:do_capture_hex",
-                    "M1":    "set_state:menu"
+                    "OK": "run:do_capture_hex",
+                    "M2": "run:do_capture_hex",
+                    "M1": "run:hex_back_cleanse"
                 }
             },
             "transitions": {
                 "on_result.status==stored_more": "uid_added",
                 "on_result.status==stored_full": "uid_added_full",
-                "on_result.status==error":       "hex_error",
-                "on_error":                      "hex_error"
+                "on_result.status==error": "hex_error",
+                "on_error": "hex_error"
             }
         },
-
         "input_dec": {
             "on_enter": "call:show_dec_input",
             "screen": {
@@ -120,49 +113,49 @@
                 },
                 "buttons": {"left": "Back", "right": "OK"},
                 "keys": {
-                    "UP":    "call:dec_roll_up",
-                    "DOWN":  "call:dec_roll_down",
-                    "LEFT":  "call:dec_move_left",
+                    "UP": "call:dec_roll_up",
+                    "DOWN": "call:dec_roll_down",
+                    "LEFT": "call:dec_move_left",
                     "RIGHT": "call:dec_move_right",
-                    "OK":    "run:do_capture_dec",
-                    "M2":    "run:do_capture_dec",
-                    "M1":    "set_state:menu"
+                    "OK": "run:do_capture_dec",
+                    "M2": "run:do_capture_dec",
+                    "M1": "run:dec_back_cleanse"
                 }
             },
             "transitions": {
                 "on_result.status==stored_more": "uid_added",
                 "on_result.status==stored_full": "uid_added_full",
-                "on_result.status==error":       "dec_error",
-                "on_error":                      "dec_error"
+                "on_result.status==error": "dec_error",
+                "on_error": "dec_error"
             }
         },
-
         "uid_added": {
             "screen": {
-                "title": "UID Added",
+                "title": "UID List",
                 "content": {
                     "type": "text",
                     "lines": [
+                        {"text": "{uid_count_label}", "size": "large", "align": "center"},
+                        {"text": "{uid_summary}", "size": "medium", "align": "center"},
                         {"text": ""},
-                        {"text": ""},
-                        {"text": "{uid_count_label}",   "size": "large", "align": "center"},
-                        {"text": ""},
-                        {"text": "{uid_summary}",       "size": "medium",  "align": "center"},
-                        {"text": ""}
+                        {"text": "OK - Write to T5577", "size": "medium", "align": "center"}
                     ]
                 },
-                "buttons": {"left": "Add next", "right": "Write"},
+                "buttons": {"left": "RemoveLast", "right": "Add"},
                 "keys": {
-                    "OK":  "set_state:place_tag",
-                    "M1":  "set_state:add_uid_method",
-                    "M2":  "set_state:place_tag"
+                    "OK": "set_state:place_tag",
+                    "M1": "run:do_remove_last",
+                    "M2": "set_state:add_uid_method"
                 }
             },
             "transitions": {
+                "on_result.status==ok": "uid_added",
+                "on_result.status==stored_more": "uid_added",
+                "on_result.status==stored_full": "uid_added_full",
+                "on_result.status==empty": "menu",
                 "on_error": "menu"
             }
         },
-
         "uid_added_full": {
             "screen": {
                 "title": "3 UIDs Ready",
@@ -170,53 +163,54 @@
                     "type": "text",
                     "lines": [
                         {"text": "Maximum 3 UIDs reached", "size": "medium", "align": "center"},
-                        {"text": ""},
                         {"text": "{uid_summary}", "size": "medium", "align": "center"},
-                        {"text": ""},
                         {"text": "OK - Write to T5577", "size": "medium", "align": "center"}
                     ]
                 },
-                "buttons": {"left": "Back", "right": "Write"},
+                "buttons": {"left": "RemoveLast", "right": "Write"},
                 "keys": {
-                    "OK":  "set_state:place_tag",
-                    "M1":  "run:do_cancel_write",
-                    "M2":  "set_state:place_tag"
+                    "OK": "set_state:place_tag",
+                    "M1": "run:do_remove_last",
+                    "M2": "set_state:place_tag"
                 }
             },
             "transitions": {
-                "on_result.status==ok": "menu",
-                "on_error":             "menu"
+                "on_result.status==ok": "uid_added",
+                "on_result.status==stored_more": "uid_added",
+                "on_result.status==stored_full": "uid_added_full",
+                "on_result.status==empty": "menu",
+                "on_error": "uid_added_full"
             }
         },
-
         "place_tag": {
             "screen": {
                 "title": "T5577 Multiwriter",
                 "content": {
                     "type": "text",
                     "lines": [
-                        {"text": ""},
                         {"text": "Place T5577 tag on reader", "size": "medium", "align": "center"},
-                        {"text": "{uid_count_label}",         "size": "medium", "align": "center"},
-                        {"text": "{uid_summary}",             "size": "medium",  "align": "center"},
-                        {"text": "Press OK to write",          "size": "medium", "align": "center"}
+                        {"text": "{uid_count_label}", "size": "medium", "align": "center"},
+                        {"text": "{uid_summary}", "size": "medium", "align": "center"},
+                        {"text": "Press OK to write", "size": "medium", "align": "center"}
                     ]
                 },
                 "buttons": {"left": "Back", "right": "Write"},
                 "keys": {
-                    "OK":  "run:do_write",
-                    "M1":  "run:do_cancel_write",
-                    "M2":  "run:do_write"
+                    "OK": "run:do_write",
+                    "M1": "run:do_cancel_write",
+                    "M2": "run:do_write"
                 }
             },
             "transitions": {
-                "on_result.status==done":  "verifying",
-                "on_result.status==ok":    "menu",
+                "on_result.status==done": "verifying",
+                "on_result.status==ok": "menu",
+                "on_result.status==stored_more": "uid_added",
+                "on_result.status==stored_full": "uid_added_full",
+                "on_result.status==empty": "menu",
                 "on_result.status==error": "write_error",
-                "on_error":                "write_error"
+                "on_error": "write_error"
             }
         },
-
         "verifying": {
             "on_enter": "run:do_verify",
             "screen": {
@@ -231,66 +225,62 @@
                 "keys": {}
             },
             "transitions": {
-                "on_result.status==ok":     "success",
+                "on_result.status==ok": "success",
                 "on_result.status==failed": "verify_fail",
-                "on_result.status==error":  "write_error",
-                "on_error":                 "write_error"
+                "on_result.status==error": "write_error",
+                "on_error": "write_error"
             }
         },
-
         "success": {
             "screen": {
                 "title": "Write OK",
                 "content": {
                     "type": "text",
                     "lines": [
+                        {"text": "Write successful!", "size": "large", "align": "center"},
+                        {"text": "{uid_count_label}", "size": "medium", "align": "center"},
+                        {"text": "{uid_summary}", "size": "medium", "align": "center"},
                         {"text": ""},
-                        {"text": "Write successful!",   "size": "large",  "align": "center"},
-                        {"text": "{uid_count_label}",   "size": "medium", "align": "center"},
-                        {"text": "{uid_summary}",       "size": "medium",  "align": "center"},
-                        {"text": ""},
-                        {"text": "Left - New session",  "size": "small",  "align": "center"}
+                        {"text": "Left - New session", "size": "small", "align": "center"}
                     ]
                 },
                 "buttons": {"left": "New", "right": "Write"},
                 "keys": {
-                    "OK":  "set_state:place_tag",
-                    "M1":  "run:do_init",
-                    "M2":  "set_state:place_tag"
+                    "OK": "set_state:place_tag",
+                    "M1": "run:do_init",
+                    "M2": "set_state:place_tag"
                 }
             },
             "transitions": {
                 "on_result.status==ok": "menu",
-                "on_error":             "menu"
+                "on_error": "menu"
             }
         },
-
         "verify_fail": {
             "screen": {
                 "title": "Verify Failed",
                 "content": {
                     "type": "text",
                     "lines": [
-                        {"text": ""},
                         {"text": "{error_msg}", "size": "medium", "align": "center"},
-                        {"text": ""},
                         {"text": "Adjust T5577 position", "size": "medium", "align": "center"},
-                        {"text": "OK - Retry write",      "size": "medium", "align": "center"}
+                        {"text": "OK - Retry write", "size": "medium", "align": "center"}
                     ]
                 },
-                "buttons": {"left": "Back", "right": "Retry"},
+                "buttons": {"left": "KeepUIDs", "right": "Retry"},
                 "keys": {
-                    "OK":  "set_state:place_tag",
-                    "M1":  "run:do_cancel_write",
-                    "M2":  "set_state:place_tag"
+                    "OK": "set_state:place_tag",
+                    "M1": "run:do_cancel_write",
+                    "M2": "set_state:place_tag"
                 }
             },
             "transitions": {
-                "on_result.status==ok": "menu",
-                "on_error":             "menu"
+                "on_result.status==stored_more": "uid_added",
+                "on_result.status==stored_full": "uid_added_full",
+                "on_result.status==empty": "menu",
+                "on_error": "menu"
             }
         },
-
         "input_method_error": {
             "screen": {
                 "title": "Error",
@@ -304,12 +294,11 @@
                 },
                 "buttons": {"left": "Back", "right": null},
                 "keys": {
-                    "OK":  "set_state:add_uid_method",
-                    "M1":  "set_state:menu"
+                    "OK": "set_state:add_uid_method",
+                    "M1": "set_state:menu"
                 }
             }
         },
-
         "hex_error": {
             "screen": {
                 "title": "Error",
@@ -323,12 +312,11 @@
                 },
                 "buttons": {"left": "Back", "right": null},
                 "keys": {
-                    "OK":  "set_state:input_hex",
-                    "M1":  "set_state:menu"
+                    "OK": "set_state:input_hex",
+                    "M1": "set_state:menu"
                 }
             }
         },
-
         "dec_error": {
             "screen": {
                 "title": "Error",
@@ -342,12 +330,11 @@
                 },
                 "buttons": {"left": "Back", "right": null},
                 "keys": {
-                    "OK":  "set_state:input_dec",
-                    "M1":  "set_state:menu"
+                    "OK": "set_state:input_dec",
+                    "M1": "set_state:menu"
                 }
             }
         },
-
         "write_error": {
             "screen": {
                 "title": "Error",
@@ -356,14 +343,21 @@
                     "lines": [
                         {"text": "{error_msg}", "size": "medium", "align": "center"},
                         {"text": ""},
-                        {"text": "OK - back to menu",  "size": "medium", "align": "center"}
+                        {"text": "OK - retry write", "size": "medium", "align": "center"}
                     ]
                 },
-                "buttons": {"left": "Back", "right": null},
+                "buttons": {"left": "KeepUIDs", "right": "Retry"},
                 "keys": {
-                    "OK":  "set_state:menu",
-                    "M1":  "finish"
+                    "OK": "set_state:place_tag",
+                    "M1": "run:do_cancel_write",
+                    "M2": "set_state:place_tag"
                 }
+            },
+            "transitions": {
+                "on_result.status==stored_more": "uid_added",
+                "on_result.status==stored_full": "uid_added_full",
+                "on_result.status==empty": "menu",
+                "on_error": "menu"
             }
         }
     }
