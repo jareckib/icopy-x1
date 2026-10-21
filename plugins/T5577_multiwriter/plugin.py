@@ -1,5 +1,5 @@
 ##########################################################################
-# Required Notice: Copyright ETOILE401 SAS (http://www.lab401.com)
+# Required Notice: Copyright ETOILE401 SAS (http://lab401.com)
 #
 # Copyright (c) 2026: ETOILE401 SAS & https://github.com
 # 
@@ -30,9 +30,10 @@ import re
 from lib.input_dec import FreeDecInput
 from lib.input_hex import FreeHexInput
 
-TIMEOUT_READ  = 10000
-TIMEOUT_WRITE = 8000
-TIMEOUT_DET   = 6000
+# OPERATIONAL TIMEOUTS SET TO MAINTAIN RIGOROUS COMMUNICATION INTEGRITY
+TIMEOUT_READ  = 8000   # Read operation limit set to 8000 ms to capture deep block responses
+TIMEOUT_WRITE = 8000   # Write operation execution window set to 8000 ms
+TIMEOUT_DET   = 6000   # Low frequency tag detection window set to 6000 ms
 
 BLOCK0 = {1: '00148040', 2: '00148080', 3: '001480C0'}
 
@@ -94,8 +95,6 @@ def dec_to_hex_uid(dec_str):
     if not re.match(r'^\d{1,10}$', dec_str):
         return None
     return '{:010X}'.format(int(dec_str))
-
-
 # ---------------------------------------------------------------------------
 # PM3 output parsers
 # ---------------------------------------------------------------------------
@@ -115,7 +114,6 @@ def _parse_block(output, block_num):
     """Extract block N value from 'lf t55xx dump' output."""
     if not output:
         return None
-    # match e.g. "[+]  0 | 00148040" or "  0 | 00148040"
     pattern = r'\[\s*\+\s*\]\s*{:02X}\s*\|\s*([0-9A-Fa-f]{{8}})'.format(block_num)
     m = re.search(pattern, output, re.IGNORECASE)
     if m:
@@ -163,7 +161,6 @@ class T55xxMultiwriterPlugin(object):
         count = len(self._get_uid_list())
         self.host.set_var('uid_count', str(count))
         self.host.set_var('uid_count_label', '{} UID{} stored'.format(count, 's' if count != 1 else ''))
-        # Summary
         lines = []
         for i, uid in enumerate(self._get_uid_list(), 1):
             lines.append('UID{}: {}'.format(i, uid))
@@ -230,12 +227,10 @@ class T55xxMultiwriterPlugin(object):
             return {'status': 'error'}
 
         return self._store_uid(uid)
-
     # -- HEX input (fixed 10 hex) ----------------------------------------
 
     def show_hex_input(self):
         canvas = self.host.getCanvas()
-        # Force exactly 10 hex characters for EM4102
         self._hex = FreeHexInput(
             canvas, label='INPUT HEX:',
             hint='Up/Down digit   Left/Right move',
@@ -269,7 +264,6 @@ class T55xxMultiwriterPlugin(object):
             return {'status': 'error'}
 
         uid = val.upper()
-        # Enforce exact 10-hex length for EM4102
         if not re.match(r'^[0-9A-F]{10}$', uid):
             self.host.set_var('error_msg', 'Invalid length.\nMust be exactly 10 hex (EM4102).')
             return {'status': 'error'}
@@ -285,14 +279,19 @@ class T55xxMultiwriterPlugin(object):
     def do_read_fob(self):
         """Read UID from the original fob via PM3."""
         self.host.set_var('error_msg', '')
-        ok, out = self._pm3('lf em 410x reader', TIMEOUT_READ)
+        # Main fob reading sequence uses a dedicated 6000 ms timeout for optimal antenna scanning stability
+        ok, out = self._pm3('lf em 410x reader', 6000)
+
+        if not ok:
+            self.host.set_var('error_msg', 'PM3 command failed.\nCheck device connection and retry.')
+            return {'status': 'error'}
+
         uid = _parse_em410x_id(out) if out else None
 
         if not uid:
             self.host.set_var('error_msg', 'No EM410x tag detected.\nAdjust position and retry.')
             return {'status': 'error'}
 
-        # Normalize to 10 hex if possible: prefer lower 10 hex characters
         if len(uid) != 10:
             if re.match(r'^[0-9A-F]{10,16}$', uid):
                 uid10 = uid[-10:]
@@ -314,7 +313,6 @@ class T55xxMultiwriterPlugin(object):
             self.host.set_var('error_msg', 'Maximum 3 UIDs reached.')
             return {'status': 'full'}
 
-        # Encode and verify
         result = encode_uid(uid)
         if result is None:
             self.host.set_var('error_msg', 'Encoding failed for:\n{}'.format(uid))
@@ -341,7 +339,6 @@ class T55xxMultiwriterPlugin(object):
             self.host.set_var('error_msg', 'No UIDs to write.')
             return {'status': 'error'}
 
-        # Encode all UIDs
         all_blocks = []
         for uid in uids:
             result = encode_uid(uid)
@@ -360,14 +357,12 @@ class T55xxMultiwriterPlugin(object):
             self.host.set_var('error_msg', 'Write failed on block 0.\nCheck tag position.')
             return {'status': 'error'}
 
-        # Write data blocks using short flags
         for i, blk in enumerate(all_blocks, 1):
             ok, _ = self._pm3('lf t55xx write -b {} -d {}'.format(i, blk), TIMEOUT_WRITE)
             if not ok:
                 self.host.set_var('error_msg', 'Write failed on block {}.\nCheck tag position.'.format(i))
                 return {'status': 'error'}
 
-        # Save to state for verification
         self.host.set_var('written_block0', block0)
         for i, blk in enumerate(all_blocks, 1):
             self.host.set_var('written_block{}'.format(i), blk)
@@ -386,51 +381,53 @@ class T55xxMultiwriterPlugin(object):
             self.host.set_var('error_msg', 'No write data to verify.')
             return {'status': 'error'}
 
-        # Detect tag sequence explicit call
+        # Target explicit detection call utilizing the 6000 ms operational timeout
         self._pm3('lf t55xx detect', TIMEOUT_DET)
 
+        # Execute dump command matching the robust 8000 ms transmission window
         ok, all_output = self._pm3('lf t55xx dump', TIMEOUT_READ)
         if not ok or not all_output:
-            # ── CRITICAL FIX ────────────────────────────────────────────────
-            # The tag was removed, causing PM3 to hang. 
-            # Send a hardware reset command to clear the communication buffer.
-            self._pm3('hw reset', 2000) 
-            # ────────────────────────────────────────────────────────────────
-            self.host.set_var('error_msg', 'Verification failed.\nCannot dump T5577 data.\nPM3 recovered, try again.')
+            # Injecting pure break signal to terminate the FPGA radio loop safely
+            self._pm3('lf', 500)
+            self.host.set_var('error_msg', 'Verification failed.\nCannot dump T5577 data.\nReader ready, try again.')
             return {'status': 'failed'}
 
-        # Check block 0
         found0 = _parse_block(all_output, 0)
         if not found0 or found0.upper() != block0.upper():
-            # Reset hardware as a precaution in case of a partial corrupted read
-            self._pm3('hw reset', 2000) 
+            self._pm3('lf', 500)
             self.host.set_var('error_msg', 'Block 0 mismatch.\nExpected: {}\nFound: {}'.format(block0, found0 or 'N/A'))
             return {'status': 'failed'}
 
-        # Check data blocks
         for i in range(1, n + 1):
             expected = self.host.get_var('written_block{}'.format(i), '')
             found = _parse_block(all_output, i)
             if not found or found.upper() != expected.upper():
-                # Reset hardware to maintain clean state after a failed validation
-                self._pm3('hw reset', 2000)
+                self._pm3('lf', 500)
                 self.host.set_var('error_msg', 'Block {} mismatch.\nExpected: {}\nFound: {}'.format(i, expected, found or 'N/A'))
                 return {'status': 'failed'}
 
         return {'status': 'ok'}
 
     def do_cancel_write(self):
-        """Declined to write to the T5577. If the collection was full
-        (3/3), clear it so DEC/HEX entry and Read EM start fresh from
-        the menu - otherwise menu/input_dec/input_hex have no route
-        forward, since _store_uid() returns status 'full' once 3 UIDs
-        are already stored and none of those screens handle that
-        status. A partial (1-2 UID) collection is left as-is so the
-        user can keep adding to it."""
+        """Declined to write to the T5577. Returns to main menu."""
         self.host.set_var('error_msg', '')
+        self._pm3('lf', 500)
+
         if len(self._get_uid_list()) >= 3:
             self._clear_uids()
             self.host.set_var('last_uid', '')
+        return {'status': 'ok'}
+
+    def do_abandon_verify(self):
+        """Back from verify_fail screen. Clears everything to start fresh."""
+        self.host.set_var('error_msg', '')
+        
+        # Preemptively clear the antenna state and flush the CDC interface registers
+        self._pm3('lf', 500)
+        
+        # Clearing the collection to reset the multiwrite process flow
+        self._clear_uids()
+        self.host.set_var('last_uid', '')
         return {'status': 'ok'}
 
     def do_remove_last(self):
