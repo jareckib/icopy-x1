@@ -1,4 +1,3 @@
-
 {
     "plugin": true,
     "name": "EM4102 From Dec",
@@ -31,7 +30,8 @@
             "screen": {
                 "title": "EM4102 From Dec",
                 "content": {
-                    "type": "empty"
+                    "type": "text",
+                    "lines": []
                 },
                 "buttons": {"left": "Exit", "right": "OK"},
                 "keys": {
@@ -41,7 +41,7 @@
                     "RIGHT": "call:dec_move_right",
                     "OK":    "run:do_capture_dec",
                     "M2":    "run:do_capture_dec",
-                    "M1":    "finish"
+                    "M1":    "run:dec_back_cleanse"
                 }
             },
             "transitions": {
@@ -50,7 +50,6 @@
                 "on_error":                "validation_error"
             }
         },
-
         "confirm_clone": {
             "screen": {
                 "title": "Confirm Clone",
@@ -144,7 +143,7 @@
                 "keys": {
                     "OK":  "set_state:confirm_clone",
                     "M2":  "set_state:confirm_clone",
-                    "M1":  "finish"
+                    "M1":  "set_state:enter_dec"
                 }
             }
         }
