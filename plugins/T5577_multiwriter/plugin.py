@@ -391,12 +391,20 @@ class T55xxMultiwriterPlugin(object):
 
         ok, all_output = self._pm3('lf t55xx dump', TIMEOUT_READ)
         if not ok or not all_output:
-            self.host.set_var('error_msg', 'Verification failed.\nCannot dump T5577 data.')
+            # ── CRITICAL FIX ────────────────────────────────────────────────
+            # The tag was removed, causing PM3 to hang. 
+            # Send a hardware reset command to clear the communication buffer.
+            self._pm3('hw reset', 2000) 
+            # Alternative option: self._pm3('hw tune', 2000) to retune the antenna
+            # ────────────────────────────────────────────────────────────────
+            self.host.set_var('error_msg', 'Verification failed.\nCannot dump T5577 data.\nPM3 recovered, try again.')
             return {'status': 'failed'}
 
         # Check block 0
         found0 = _parse_block(all_output, 0)
         if not found0 or found0.upper() != block0.upper():
+            # Reset hardware as a precaution in case of a partial corrupted read
+            self._pm3('hw reset', 2000) 
             self.host.set_var('error_msg', 'Block 0 mismatch.\nExpected: {}\nFound: {}'.format(block0, found0 or 'N/A'))
             return {'status': 'failed'}
 
@@ -405,6 +413,8 @@ class T55xxMultiwriterPlugin(object):
             expected = self.host.get_var('written_block{}'.format(i), '')
             found = _parse_block(all_output, i)
             if not found or found.upper() != expected.upper():
+                # Reset hardware to maintain clean state after a failed validation
+                self._pm3('hw reset', 2000)
                 self.host.set_var('error_msg', 'Block {} mismatch.\nExpected: {}\nFound: {}'.format(i, expected, found or 'N/A'))
                 return {'status': 'failed'}
 
