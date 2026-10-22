@@ -26,13 +26,13 @@ Supports:
 """
 
 import re
-
 from lib.input_dec import FreeDecInput
 from lib.input_hex import FreeHexInput
 
 TIMEOUT_READ  = 10000
 TIMEOUT_WRITE = 8000
-TIMEOUT_DET   = 6000
+TIMEOUT_PRECHECK = 5000
+TIMEOUT_DET   = 115000  # Long PM3 detect; below rftask 120 s limit
 
 BLOCK0 = {1: '00148040', 2: '00148080', 3: '001480C0'}
 
@@ -112,17 +112,30 @@ def _parse_em410x_id(output):
 
 
 def _parse_block(output, block_num):
-    """Extract block N value from 'lf t55xx dump' output."""
+    """Parse a Page 0 block from T55xx dump or single-block read output.
+
+    Ignore ANSI terminal formatting and never accidentally use Page 1 blocks.
+    """
     if not output:
         return None
-    # match e.g. "[+]  0 | 00148040" or "  0 | 00148040"
-    pattern = r'\[\s*\+\s*\]\s*{:02X}\s*\|\s*([0-9A-Fa-f]{{8}})'.format(block_num)
-    m = re.search(pattern, output, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    m2 = re.search(r'\b{:02d}\s*\|\s*([0-9A-Fa-f]{{8}})'.format(block_num), output)
-    if m2:
-        return m2.group(1).upper()
+    if isinstance(output, bytes):
+        output = output.decode('utf-8', 'replace')
+    output = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', str(output))
+    output = output.replace('\r', '\n')
+    page = 0
+    for line in output.splitlines():
+        heading = re.search(r'\bPage\s+([01])\b', line, re.IGNORECASE)
+        if heading:
+            page = int(heading.group(1))
+            continue
+        if page != 0:
+            continue
+        match = re.search(
+            r'^\s*(?:\[\+\]\s*)?0?([0-7])\s*\|\s*([0-9A-Fa-f]{8})(?=\s*\|)',
+            line,
+        )
+        if match and int(match.group(1)) == block_num:
+            return match.group(2).upper()
     return None
 
 
@@ -150,6 +163,7 @@ class T55xxMultiwriterPlugin(object):
         return text
 
     def _pm3(self, cmd, timeout=TIMEOUT_WRITE):
+        """Execute one PM3 command; leave transport recovery to the executor."""
         return self.host.pm3_command(cmd, timeout=timeout)
 
     def _get_uid_list(self):
@@ -181,6 +195,7 @@ class T55xxMultiwriterPlugin(object):
         for i, uid in enumerate(self._get_uid_list(), 1):
             lines.append(self._tr('UID{}: {}').format(i, uid))
         self.host.set_var('uid_summary', '\n'.join(lines) if lines else self._tr('No UIDs yet'))
+        self.host.set_var('block0_label', 'Block 0: {}'.format(BLOCK0[count]) if count in BLOCK0 else 'Block 0: --------')
         return count
 
     # -- Initialization ----------------------------------------------------
@@ -190,6 +205,7 @@ class T55xxMultiwriterPlugin(object):
         self.host.set_var('error_msg', '')
         self.host.set_var('last_uid', '')
         self.host.set_var('written_count', '0')
+        self.host.set_var('block0_label', 'Block 0: --------')
         self.host.set_var('uid_summary', self._tr('No UIDs yet'))
         self.host.set_var('uid_count_label', self._tr('0 UIDs stored'))
         self.host.set_var('input_mode', '')
@@ -203,7 +219,7 @@ class T55xxMultiwriterPlugin(object):
         canvas = self.host.getCanvas()
         self._dec = FreeDecInput(
             canvas, label=self._tr('INPUT DEC:'),
-            hint=self._tr('Up/Down digit   Left/Right move'),
+            hint=self._tr('\nUp/Down - digit\nL/R: move'),
             max_length=10,
         )
         self._dec.show()
@@ -228,6 +244,9 @@ class T55xxMultiwriterPlugin(object):
         """Get UID from the dec input (10 decimal digits = engraved ID)."""
         self.host.set_var('error_msg', '')
         dec = self._dec.getValue() if self._dec is not None else ''
+        if self._dec is not None:
+            self._dec.hide()
+            self._dec = None
 
         if not dec:
             self.host.set_var('error_msg', self._tr('Enter a digit.'))
@@ -251,7 +270,7 @@ class T55xxMultiwriterPlugin(object):
         # Force exactly 10 hex characters for EM4102
         self._hex = FreeHexInput(
             canvas, label=self._tr('INPUT HEX:'),
-            hint=self._tr('Up/Down digit   Left/Right move'),
+            hint=self._tr('\nUp/Down - digit\nL/R: move'),
             max_length=10,
             per_line=10,
         )
@@ -277,6 +296,9 @@ class T55xxMultiwriterPlugin(object):
         """Get UID from the hex input widget. Only exactly 10 hex chars accepted."""
         self.host.set_var('error_msg', '')
         val = self._hex.getValue() if self._hex is not None else ''
+        if self._hex is not None:
+            self._hex.hide()
+            self._hex = None
         if not val:
             self.host.set_var('error_msg', self._tr('Enter hex characters.'))
             return {'status': 'error'}
@@ -292,6 +314,34 @@ class T55xxMultiwriterPlugin(object):
             return {'status': 'error'}
 
         return self._store_uid(uid)
+
+    def _back_from_input(self, widget_name):
+        """Hide the editor on the UI thread; preserve already stored UIDs."""
+        widget = getattr(self, widget_name)
+        if widget is not None:
+            widget.hide()
+            setattr(self, widget_name, None)
+        count = self._update_uid_count()
+        if count >= 3:
+            return {'status': 'stored_full'}
+        if count > 0:
+            return {'status': 'stored_more'}
+        return {'status': 'empty'}
+
+    def dec_back_cleanse(self):
+        return self._back_from_input('_dec')
+
+    def hex_back_cleanse(self):
+        return self._back_from_input('_hex')
+
+    def do_return_to_uid_list(self):
+        """Return to the UID summary without discarding stored entries."""
+        count = self._update_uid_count()
+        if count >= 3:
+            return {'status': 'stored_full'}
+        if count > 0:
+            return {'status': 'stored_more'}
+        return {'status': 'empty'}
 
     # -- Read original fob ------------------------------------------------
 
@@ -345,88 +395,145 @@ class T55xxMultiwriterPlugin(object):
         else:
             return {'status': 'stored_full'}
 
-    # -- Write to T5577 ---------------------------------------------------
+    def do_precheck(self):
+        """Fast LF protocol check; never start detect if the transport timed out.
 
-    def do_write(self):
-        """Encode all UIDs and write them to the T5577 tag."""
+        A positive LF decode is evidence of a readable tag, not proof of T5577.
+        Blank/unconfigured/password-protected T5577 may fail this precheck.
+        """
         self.host.set_var('error_msg', '')
-        uids = self._get_uid_list()
-
-        if not uids:
+        if not self._get_uid_list():
             self.host.set_var('error_msg', self._tr('No UIDs to write.'))
             return {'status': 'error'}
+        try:
+            ok, out = self._pm3('lf search', TIMEOUT_PRECHECK)
+        except Exception:
+            self.host.set_var('error_msg', self._tr('LF check: communication error.'))
+            return {'status': 'error'}
+        if not ok:
+            self.host.set_var('error_msg', self._tr('LF check failed or timed out.'))
+            return {'status': 'error'}
+        output = out or ''
+        # `No known 125/134 kHz tags found` refers to decoded protocols,
+        # not to the T55xx chipset. PM3 can identify a blank T5577 later
+        # in the same `lf search` response.
+        # Only a positive chipset identification permits the slower detect.
+        found = bool(re.search(
+            r'\bChipset\s*\.{0,4}\s*[:=]?\s*T55(?:xx|x7|57|77)\b',
+            output, re.IGNORECASE))
+        if not found:
+            self.host.set_var('error_msg', self._tr(
+                'No T55xx chipset found.\nCheck tag and position.'))
+            return {'status': 'error'}
+        return {'status': 'ok'}
 
-        # Encode all UIDs
+    # -- Write to T5577 ---------------------------------------------------
+
+    def do_detect(self):
+        """Detect tag only after successful LF precheck."""
+        self.host.set_var('error_msg', '')
+        if not self._get_uid_list():
+            self.host.set_var('error_msg', self._tr('No UIDs to write.'))
+            return {'status': 'error'}
+        try:
+            ok, detect_output = self._pm3('lf t55xx detect', TIMEOUT_DET)
+        except Exception:
+            self.host.set_var('error_msg', self._tr('T5577 detection: communication error.'))
+            return {'status': 'error'}
+        if not ok or not re.search(r'Chip type\s*\.{0,12}\s*[:=]?\s*T55x7\b', detect_output or '', re.IGNORECASE):
+            self.host.set_var('error_msg', self._tr('T5577 detection failed.\nCheck tag and position.'))
+            return {'status': 'error'}
+        return {'status': 'ok'}
+
+    def do_write(self):
+        """Write data only after precheck and detect have succeeded."""
+        self.host.set_var('error_msg', '')
+        uids = self._get_uid_list()
+        if not 1 <= len(uids) <= 3:
+            self.host.set_var('error_msg', self._tr('Invalid UID count.'))
+            return {'status': 'error'}
         all_blocks = []
         for uid in uids:
             result = encode_uid(uid)
-            if result is None:
-                self.host.set_var('error_msg', self._tr('Encoding failed for:\n{}').format(uid))
+            if result is None or int(uid, 16) == 0:
+                self.host.set_var('error_msg', self._tr('Invalid UID: {}').format(uid))
                 return {'status': 'error'}
-
-            blk_a, blk_b = result
-            all_blocks.append(blk_a)
-            all_blocks.append(blk_b)
-
+            all_blocks.extend(result)
         block0 = BLOCK0[len(uids)]
-
-        ok, _ = self._pm3('lf t55xx write -b 0 -d {}'.format(block0), TIMEOUT_WRITE)
-        if not ok:
-            self.host.set_var('error_msg', self._tr('Write failed on block 0.\nCheck tag position.'))
-            return {'status': 'error'}
-
-        # Write data blocks using short flags
-        for i, blk in enumerate(all_blocks, 1):
-            ok, _ = self._pm3('lf t55xx write -b {} -d {}'.format(i, blk), TIMEOUT_WRITE)
+        self.host.set_var('block0_label', 'Block 0: {}'.format(block0))
+        # A new attempt invalidates the previous verification snapshot.
+        self.host.set_var('written_count', '0')
+        self.host.set_var('written_block0', '')
+        for i in range(1, 7):
+            self.host.set_var('written_block{}'.format(i), '')
+        for i, blk in [(0, block0)] + list(enumerate(all_blocks, 1)):
+            try:
+                ok, _ = self._pm3('lf t55xx write -b {} -d {}'.format(i, blk), TIMEOUT_WRITE)
+            except Exception:
+                self.host.set_var('error_msg', self._tr('Communication error on block {}.').format(i))
+                return {'status': 'error'}
             if not ok:
                 self.host.set_var('error_msg', self._tr('Write failed on block {}.\nCheck tag position.').format(i))
                 return {'status': 'error'}
-
-        # Save to state for verification
         self.host.set_var('written_block0', block0)
         for i, blk in enumerate(all_blocks, 1):
             self.host.set_var('written_block{}'.format(i), blk)
         self.host.set_var('written_count', str(len(all_blocks)))
-
         return {'status': 'done'}
 
     def do_verify(self):
-        """Post-write verification — reads blocks via dump sequence."""
+        """Verify Page 0 using dump, with per-block reads if dump is unparseable."""
         self.host.set_var('error_msg', '')
-
         block0 = self.host.get_var('written_block0', '')
-        n = int(self.host.get_var('written_count', '0'))
-
-        if not block0 or n == 0:
+        try:
+            n = int(self.host.get_var('written_count', '0'))
+        except (TypeError, ValueError):
+            n = 0
+        if not block0 or not 1 <= n <= 6:
             self.host.set_var('error_msg', self._tr('No write data to verify.'))
             return {'status': 'error'}
 
-        # Require a successful detect before attempting the dump. Do not claim
-        # that the reader is ready when the device did not acknowledge detection.
-        detect_ok, detect_output = self._pm3('lf t55xx detect', TIMEOUT_DET)
-        if not detect_ok:
-            self.host.set_var('error_msg', self._tr('Verification failed.\nT5577 detection command failed.'))
+        # Re-detect after writing Block 0: the RF configuration may have changed.
+        # Do not proceed with dump/read if detection fails or times out.
+        try:
+            detected, detect_output = self._pm3('lf t55xx detect', TIMEOUT_DET)
+        except Exception:
+            detected, detect_output = False, ''
+        if not detected or not re.search(
+                r'Chip type\s*\.{0,12}\s*[:=]?\s*T55x7\b',
+                detect_output or '', re.IGNORECASE):
+            self.host.set_var('error_msg', self._tr(
+                'Cannot detect T5577 after write.\nVerification failed.'))
             return {'status': 'failed'}
 
-        ok, all_output = self._pm3('lf t55xx dump', TIMEOUT_READ)
-        if not ok or not all_output:
-            self.host.set_var('error_msg', self._tr('Verification failed.\nCannot dump T5577 data.'))
-            return {'status': 'failed'}
+        # First try the existing single dump (one RF command for all blocks).
+        try:
+            ok, all_output = self._pm3('lf t55xx dump', TIMEOUT_READ)
+        except Exception:
+            ok, all_output = False, ''
+        if not ok:
+            all_output = ''
 
-        # Check block 0
-        found0 = _parse_block(all_output, 0)
-        if not found0 or found0.upper() != block0.upper():
-            self.host.set_var('error_msg', self._tr('Block 0 mismatch.\nExpected: {}\nFound: {}').format(block0, found0 or 'N/A'))
-            return {'status': 'failed'}
-
-        # Check data blocks
-        for i in range(1, n + 1):
-            expected = self.host.get_var('written_block{}'.format(i), '')
+        for i in range(n + 1):
+            expected = block0 if i == 0 else self.host.get_var('written_block{}'.format(i), '')
             found = _parse_block(all_output, i)
-            if not found or found.upper() != expected.upper():
-                self.host.set_var('error_msg', self._tr('Block {} mismatch.\nExpected: {}\nFound: {}').format(i, expected, found or 'N/A'))
+            if found is None:
+                # Only a missing/unparseable value needs an individual read.
+                # A genuine mismatch must remain a failure, not be hidden.
+                try:
+                    read_ok, read_output = self._pm3('lf t55xx read -b {}'.format(i), TIMEOUT_READ)
+                except Exception:
+                    read_ok, read_output = False, ''
+                if read_ok:
+                    found = _parse_block(read_output, i)
+            if found is None:
+                self.host.set_var('error_msg', self._tr(
+                    'Cannot read block {}.\nVerification failed.').format(i))
                 return {'status': 'failed'}
-
+            if found.upper() != expected.upper():
+                self.host.set_var('error_msg', self._tr(
+                    'Block {} mismatch.\nExpected: {}\nFound: {}').format(i, expected, found))
+                return {'status': 'failed'}
         return {'status': 'ok'}
 
     def do_cancel_write(self):
