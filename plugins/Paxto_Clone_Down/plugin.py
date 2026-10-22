@@ -11,10 +11,16 @@
 #
 # This entire header "Required Notice" must remain in place.
 ##########################################################################
-"""Paxton Clone&Down plugin for iCopy-XS"""
+"""
+Paxton Clone&Down plugin for iCopy-XS
+Clone Paxton tags to PCF7936 or downgrade them to EM4102-compatible T5577 tags.
+Includes tag reading, write verification, and log management.
+Copyright (c) 2026: jareckib
+"""
 
 import re
 import os
+import tempfile
 
 from lib._constants import SCREEN_W
 from lib import resources
@@ -190,14 +196,13 @@ def _log_paxton_entries():
                    for i in range(4, 8)):
             continue
         good.append(e)
-    good.sort(key=lambda e: e['name'].lower())
+    good.sort(key=lambda e: e['name'])
     return good
 
 
 def _log_name_exists(name):
-    low = name.lower()
-    for e in _log_read_entries():
-        if e['name'].lower() == low:
+    for e in _log_paxton_entries():
+        if e['name'] == name:
             return True
     return False
 
@@ -207,16 +212,34 @@ def _log_save(name, blocks, em_id, variant, uid):
         return False
     try:
         from datetime import datetime
-        with open(LOG_PATH, 'a') as f:
-            f.write('Name: {}\n'.format(name))
-            f.write('Date: {}\n'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-            f.write('Mode: paxton\n')
-            for i in range(4, 8):
-                f.write('Block {}: {}\n'.format(i, blocks.get(i, 'nil')))
-            f.write('EM4102 ID: {}\n'.format(em_id or 'nil'))
-            f.write('Variant: {}\n'.format(variant or 'nil'))
-            f.write('UID: {}\n'.format(uid or 'nil'))
-            f.write(LOG_SEP + '\n')
+        record = ['Name: {}'.format(name),
+                  'Date: {}'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                  'Mode: paxton']
+        record.extend('Block {}: {}'.format(i, blocks[i]) for i in range(4, 8))
+        record.extend(['EM4102 ID: {}'.format(em_id or 'nil'),
+                       'Variant: {}'.format(variant or 'nil'),
+                       'UID: {}'.format(uid or 'nil'), LOG_SEP])
+        if not all(re.fullmatch(r'[0-9A-Fa-f]{8}', blocks.get(i, '')) for i in range(4, 8)):
+            return False
+        existing = b''
+        if os.path.exists(LOG_PATH):
+            with open(LOG_PATH, 'rb') as f:
+                existing = f.read()
+        # Preserve legacy records and incomplete tails instead of silently deleting data.
+        # A new record starts on a fresh line; readers ignore invalid old entries.
+        if existing and not existing.endswith(b'\n'):
+            existing += b'\n'
+        fd, tmp = tempfile.mkstemp(prefix='.paxton_', dir=DUMP_DIR)
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(existing)
+                f.write(('\n'.join(record) + '\n').encode('utf-8'))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, LOG_PATH)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
         return True
     except Exception:
         return False
@@ -252,6 +275,16 @@ class PaxtonCloneDownPlugin(object):
         self._pick_idx = 0
         self._txt = None
         self._txt_mode = None
+        self._pending_log_name = ''
+        self._pending_find_query = ''
+
+    def _tr(self, template, *args):
+        """Translate the unformatted template, then apply arguments."""
+        translator = getattr(self.host, 'tr', None)
+        value = translator(template) if callable(translator) else template
+        if not isinstance(value, str):
+            value = template
+        return value.format(*args) if args else value
 
     def _pm3(self, cmd, timeout=WRITE_TIMEOUT):
         return self.host.pm3_command(cmd, timeout=timeout)
@@ -263,7 +296,7 @@ class PaxtonCloneDownPlugin(object):
             pass
 
     def _fail(self, msg, back, retry_action=None, retry_kind='normal'):
-        self.host.set_var('error_msg', msg)
+        self.host.set_var('error_msg', self._tr(msg))
         self.host.set_var('err_return', back)
         self.host.set_var('err_retry', retry_action or '')
         self.host.set_var('err_retry_kind', retry_kind)
@@ -331,7 +364,7 @@ class PaxtonCloneDownPlugin(object):
             s('block{}'.format(i), blocks.get(i, ''))
         s('tag_variant', variant or '')
         s('em_id', hex_id or '')
-        s('id_line', 'EM ID {}'.format(hex_id) if hex_id else 'EM ID n/a')
+        s('id_line', self._tr('EM ID {}', hex_id) if hex_id else self._tr('EM ID n/a'))
         s('src_name', src_name or '')
         s('src_line', src_line or '')
         s('clone_count', '0')
@@ -354,7 +387,7 @@ class PaxtonCloneDownPlugin(object):
             self.host.getCanvas().create_text(
                 SCREEN_W // 2,
                 50,
-                text='Mode: ' + mode,
+                text=self._tr('Mode: {}', mode),
                 fill='#000000',
                 font=resources.get_font(16),
                 anchor='n',
@@ -389,7 +422,7 @@ class PaxtonCloneDownPlugin(object):
 
     def _do_read(self, flow, need_id):
         self.host.set_var('flow', flow)
-        self._toast('Reading fob...')
+        self._toast(self._tr('Reading fob...'))
         blocks, uid, typ, out = self._read_blocks()
         back = 'read_' + flow
         if blocks is None:
@@ -409,7 +442,7 @@ class PaxtonCloneDownPlugin(object):
                 retry_action=retry_action,
                 retry_kind='readwrite'
             )
-        self._store(blocks, uid, variant, hex_id, '', 'Read OK: {}'.format(variant or 'Paxton'))
+        self._store(blocks, uid, variant, hex_id, '', self._tr('Read OK: {}', variant or 'Paxton'))
         return {'status': 'found'}
 
     def do_read_clone(self):
@@ -423,13 +456,13 @@ class PaxtonCloneDownPlugin(object):
         blocks = self._get_blocks()
         if not self._blocks_ok(blocks):
             return self._fail('No valid block data.\nRead a fob first.', 'menu')
-        self._toast('Writing fob...')
+        self._toast(self._tr('Writing fob...'))
         for page in range(4, 8):
             cmd = 'lf hitag wrbl --ht2 -p {} -d {} -k {}'.format(page, blocks[page], PAXTON_KEY)
             ok, _ = self._pm3(cmd, WRITE_TIMEOUT)
             if not ok:
                 return self._fail(
-                    'Block {} write failed\nCheck fob position'.format(page),
+                    self._tr('PCF7936 block {} failed\nCheck fob position', page),
                     'readed_clone',
                     retry_action='do_clone_paxton',
                     retry_kind='write_retry'
@@ -437,7 +470,7 @@ class PaxtonCloneDownPlugin(object):
         read_blocks, uid, typ, out = self._read_blocks()
         if read_blocks is None:
             return self._fail(
-                'Write verification failed.\nCheck fob position.',
+                'PCF7936 verify failed.\nCheck fob position.',
                 'readed_clone',
                 retry_action='do_clone_paxton',
                 retry_kind='write_retry'
@@ -445,7 +478,7 @@ class PaxtonCloneDownPlugin(object):
         failed = [str(i) for i in range(4, 8) if read_blocks.get(i, '') != blocks.get(i, '')]
         if failed:
             return self._fail(
-                'Verify failed:\nblock {} differs.\nAdjust and retry.'.format(', '.join(failed)),
+                self._tr('Verify failed:\nblock {} differs.\nAdjust and retry.', ', '.join(failed)),
                 'readed_clone',
                 retry_action='do_clone_paxton',
                 retry_kind='write_retry'
@@ -459,40 +492,39 @@ class PaxtonCloneDownPlugin(object):
         em_id = self.host.get_var('em_id', '')
         if not re.match(r'^[0-9A-Fa-f]{10}$', em_id or ''):
             return self._fail('No valid EM4102 ID.\nRead a Paxton fob.', 'menu')
-        self._toast('Writing T5577...')
+        self._toast(self._tr('Writing T5577...'))
         ok, out = self._pm3('lf em 410x clone --id {}'.format(em_id), CLONE_TIMEOUT)
         if not ok:
             return self._fail(
-                'EM4102 write failed.\nReposition T5577.',
+                'T5577 write failed.\nCheck tag position.',
                 'readed_down',
                 retry_action='do_clone_em4102',
                 retry_kind='write_retry'
             )
 
-        ok2, out2 = self._pm3('lf em 410x read', READ_TIMEOUT)
-        if not ok2 or not out2:
-            return self._fail(
-                'Write verification failed.\nReposition T5577.',
-                'readed_down',
-                retry_action='do_clone_em4102',
-                retry_kind='write_retry'
-            )
+        # Use the same public command as the tested EM4102 and Multiwriter
+        # plugins. pm3_compat translates it for legacy firmware as needed.
+        ok2, out2 = self._pm3('lf em 410x reader', READ_TIMEOUT)
         found = None
-        for line in out2.splitlines():
-            m = re.search(r'EM\s?410x\s+ID[\s:]*([0-9A-Fa-f]{10})', line)
-            if m:
-                found = m.group(1).upper()
-                break
+        if ok2 and out2:
+            for line in out2.splitlines():
+                m = re.search(
+                    r'\b(?:EM\s*410x(?:\s+XL)?\s*ID|EM\s+TAG\s+ID)'
+                    r'\s*[:=]?\s*([0-9A-Fa-f]{10})(?![0-9A-Fa-f])',
+                    line, re.I)
+                if m:
+                    found = m.group(1).upper()
+                    break
         if not found:
             return self._fail(
-                'Write verification failed.\nReposition T5577.',
+                'No tag detected.\nCheck tag position.',
                 'readed_down',
                 retry_action='do_clone_em4102',
                 retry_kind='write_retry'
             )
         if found != em_id.upper():
             return self._fail(
-                'ID mismatch!\nExp:   {}\nFound: {}'.format(em_id.upper(), found),
+                self._tr('Tag data mismatch.\nExp: {}\nGot: {}', em_id.upper(), found),
                 'readed_down',
                 retry_action='do_clone_em4102',
                 retry_kind='write_retry'
@@ -522,7 +554,7 @@ class PaxtonCloneDownPlugin(object):
         canvas = self.host.getCanvas()
         self._txt = FreeTextInput(
             canvas,
-            label='Name:',
+            label=self._tr('Name:'),
             max_length=20,
             y_offset=180,
             text_color='#0000FF'
@@ -543,7 +575,7 @@ class PaxtonCloneDownPlugin(object):
         canvas = self.host.getCanvas()
         self._txt = FreeTextInput(
             canvas,
-            label='Find:',
+            label=self._tr('Find:'),
             max_length=20,
             y_offset=170,
             text_color='#FF0000'
@@ -595,7 +627,7 @@ class PaxtonCloneDownPlugin(object):
         name = ''
         if self._txt is not None:
             try:
-                name = self._txt.getValue().strip()
+                name = self._txt.getValue().rstrip()
                 self._txt.hide()
             except Exception:
                 pass
@@ -605,9 +637,10 @@ class PaxtonCloneDownPlugin(object):
                 self._clear_mode_label()
                 self._set_txt_charset()
         else:
-            name = (self.host.get_input() or '').strip()
+            name = (self.host.get_input() or '').rstrip()
 
-        return self._do_save_log_with_name(name)
+        self._pending_log_name = name
+        return {'status': 'captured'}
 
     def do_capture_find(self):
         query = ''
@@ -625,19 +658,25 @@ class PaxtonCloneDownPlugin(object):
         else:
             query = (self.host.get_input() or '').strip()
 
-        if query.upper() == 'A':
-            query = ''
+        self._pending_find_query = query
+        return {'status': 'captured'}
 
-        return self._do_find_with_query(query)
+    def do_save_captured_log(self):
+        return self._do_save_log_with_name(self._pending_log_name)
+
+    def do_find_captured(self):
+        return self._do_find_with_query(self._pending_find_query)
 
     def _do_save_log_with_name(self, name):
-        name = (name or '').strip()
+        name = (name or '').rstrip()
+        if name.startswith(' '):
+            return self._fail('Name cannot start\nwith a space.', 'log_name')
         if not name:
             return self._fail('Name cannot be\nempty.', 'log_name')
         if len(name) < 2:
             return self._fail('Name too short.\nMin 2 chars.', 'log_name')
         if _log_name_exists(name):
-            return self._fail('Name already exists:\n{}'.format(name), 'log_name')
+            return self._fail(self._tr('Name already exists:\n{}', name), 'log_name')
         blocks = self._get_blocks()
         if not self._blocks_ok(blocks):
             return self._fail('No valid block data.', 'menu')
@@ -646,26 +685,46 @@ class PaxtonCloneDownPlugin(object):
         uid = self.host.get_var('uid', '')
         if not _log_save(name, blocks, em_id, variant, uid):
             return self._fail('Could not save log.\nWrite failed.', 'log_name',
-                              retry_action='do_capture_log_name', retry_kind='logname')
+                              retry_action='do_retry_save_log', retry_kind='logname')
         dump = _dump_save(blocks, uid, variant)
         self.host.set_var('saved_name', name)
-        self.host.set_var('dump_line', 'Dump entry saved' if dump else 'Dump NOT saved')
+        self.host.set_var('dump_line', self._tr('Dump entry saved' if dump else 'Dump NOT saved'))
         return {'status': 'done'}
+
+    def do_retry_save_log(self):
+        return self._do_save_log_with_name(self._pending_log_name)
+
+    @staticmethod
+    def _match_log_entries(entries, query):
+        """A is the input widget's default: show the full log list.
+
+        A single character is never an exact-name lookup. Other one-letter
+        queries list names beginning with that letter, case-sensitively.
+        For 2+ chars prefer an exact name, then initial-letter suggestions.
+        """
+        if query == 'A':
+            return entries
+        if not query:
+            return []
+        if len(query) == 1:
+            return [e for e in entries if e['name'].startswith(query)]
+        exact = [e for e in entries if e['name'] == query]
+        if exact:
+            return exact
+        return [e for e in entries if e['name'].startswith(query[0])]
 
     def _do_find_with_query(self, query):
         q = (query or '').strip()
+        if not q:
+            return self._fail('Enter a search letter.', 'find_name')
         entries = _log_paxton_entries()
         if not entries:
             return self._fail('No saved Paxton entries in the log.', 'menu')
-        if not q:
-            matches = entries
-        else:
-            low = q.lower()
-            exact = [e for e in entries if e['name'].lower() == low]
-            matches = exact or [e for e in entries if low in e['name'].lower()]
+        matches = self._match_log_entries(entries, q)
         if not matches:
-            return self._fail('Not found:\n{}'.format(q), 'find_name')
-        if len(matches) == 1:
+            return self._fail(self._tr('Not found:\n{}', q), 'find_name')
+        # Never auto-load on a one-character query, even with one result.
+        if len(q) >= 2 and len(matches) == 1:
             self._pick = matches
             self._load_entry(matches[0])
             return {'status': 'loaded'}
@@ -706,9 +765,9 @@ class PaxtonCloneDownPlugin(object):
         except Exception:
             return {'status': self.host.get_var('err_return', '') or 'menu'}
 
-        return self._resolve_retry_result(result)
+        return self._resolve_retry_result(result, retry_kind)
 
-    def _resolve_retry_result(self, result):
+    def _resolve_retry_result(self, result, retry_kind='normal'):
         """Translate a retried action's raw status ('found'/'done'/'error')
         into an explicit status the `error` screen's transitions can match.
         A bare 'found'/'done' is ambiguous on its own (both read_clone and
@@ -723,6 +782,8 @@ class PaxtonCloneDownPlugin(object):
         if status == 'found':
             return {'status': 'readed_down' if flow == 'down' else 'readed_clone'}
         if status == 'done':
+            if retry_kind == 'logname':
+                return {'status': 'saved'}
             return {'status': 'down_ok' if flow == 'down' else 'clone_ok'}
         return result or {'status': self.host.get_var('err_return', '') or 'menu'}
 
@@ -732,7 +793,7 @@ class PaxtonCloneDownPlugin(object):
         if not hex_id:
             hex_id = e.get('em_id', '')
             variant = e.get('variant', '') or variant
-        self._store(blocks, e.get('uid', ''), variant, hex_id, e['name'], 'Log: {}'.format(e['name']))
+        self._store(blocks, e.get('uid', ''), variant, hex_id, e['name'], self._tr('Log: {}', e['name']))
 
     def _pick_refresh(self):
         n = len(self._pick)
@@ -746,26 +807,7 @@ class PaxtonCloneDownPlugin(object):
         self.host.set_var('pick_view', '\n'.join(rows))
 
     def do_find(self):
-        query = (self.host.get_input() or '').strip()
-        entries = _log_paxton_entries()
-        if not entries:
-            return self._fail('No saved Paxton entries in the log.', 'menu')
-        if not query:
-            matches = entries
-        else:
-            q = query.lower()
-            exact = [e for e in entries if e['name'].lower() == q]
-            matches = exact or [e for e in entries if q in e['name'].lower()]
-        if not matches:
-            return self._fail('Not found:\n{}'.format(query), 'find_name')
-        if len(matches) == 1:
-            self._pick = matches
-            self._load_entry(matches[0])
-            return {'status': 'loaded'}
-        self._pick = matches
-        self._pick_idx = 0
-        self._pick_refresh()
-        return {'status': 'pick'}
+        return self._do_find_with_query(self.host.get_input() or '')
 
     def do_pick_up(self):
         if self._pick:
