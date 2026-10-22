@@ -65,7 +65,8 @@
                 "on_result.status==found_last": "clone_last_prompt",
                 "on_result.status==done": "clone_ok",
                 "on_result.status==error": "error",
-                "on_error": "error"
+                "on_error": "error",
+                "on_result.status==ready": "checking"
             }
         },
         "read_tag": {
@@ -147,15 +148,16 @@
                     "right": "Clone"
                 },
                 "keys": {
-                    "OK": "call:do_clone_raw",
-                    "M2": "call:do_clone_raw",
+                    "OK": "call:do_prepare_clone",
+                    "M2": "call:do_prepare_clone",
                     "M1": "set_state:menu"
                 }
             },
             "transitions": {
                 "on_result.status==done": "clone_ok",
                 "on_result.status==error": "error",
-                "on_error": "error"
+                "on_error": "error",
+                "on_result.status==ready": "checking"
             }
         },
         "show_data": {
@@ -192,15 +194,16 @@
                     "right": "Clone"
                 },
                 "keys": {
-                    "OK": "call:do_clone_raw",
-                    "M2": "call:do_clone_raw",
+                    "OK": "call:do_prepare_clone",
+                    "M2": "call:do_prepare_clone",
                     "M1": "set_state:menu"
                 }
             },
             "transitions": {
                 "on_result.status==done": "clone_ok",
                 "on_result.status==error": "error",
-                "on_error": "error"
+                "on_error": "error",
+                "on_result.status==ready": "checking"
             }
         },
         "clone_ok": {
@@ -274,7 +277,8 @@
                 "on_result.status==done": "clone_ok",
                 "on_result.status==error": "error",
                 "on_error": "error",
-                "on_result.status==wrong_tag": "wrong_tag"
+                "on_result.status==wrong_tag": "wrong_tag",
+                "on_result.status==ready": "checking"
             }
         },
         "wrong_tag": {
@@ -308,6 +312,150 @@
                     "M1": "set_state:menu",
                     "M2": "set_state:menu"
                 }
+            }
+        },
+        "checking": {
+            "on_enter": "run:do_precheck_clone",
+            "screen": {
+                "title": "Checking T5577",
+                "content": {
+                    "type": "text",
+                    "lines": [
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "Checking tag...",
+                            "size": "medium",
+                            "align": "center"
+                        }
+                    ]
+                },
+                "buttons": {
+                    "left": null,
+                    "right": null
+                },
+                "keys": {}
+            },
+            "transitions": {
+                "on_result.status==ok": "detecting",
+                "on_result.status==error": "error",
+                "on_error": "error"
+            }
+        },
+        "detecting": {
+            "on_enter": "run:do_detect_clone",
+            "screen": {
+                "title": "Detecting T5577",
+                "content": {
+                    "type": "text",
+                    "lines": [
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "Detecting tag...",
+                            "size": "medium",
+                            "align": "center"
+                        }
+                    ]
+                },
+                "buttons": {
+                    "left": null,
+                    "right": null
+                },
+                "keys": {}
+            },
+            "transitions": {
+                "on_result.status==ok": "writing",
+                "on_result.status==error": "error",
+                "on_error": "error"
+            }
+        },
+        "writing": {
+            "on_enter": "run:do_write_raw",
+            "screen": {
+                "title": "Writing T5577",
+                "content": {
+                    "type": "text",
+                    "lines": [
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "Writing RAW data...",
+                            "size": "medium",
+                            "align": "center"
+                        }
+                    ]
+                },
+                "buttons": {
+                    "left": null,
+                    "right": null
+                },
+                "keys": {}
+            },
+            "transitions": {
+                "on_result.status==written": "verifying",
+                "on_result.status==error": "error",
+                "on_error": "error"
+            }
+        },
+        "verifying": {
+            "on_enter": "run:do_verify_raw",
+            "screen": {
+                "title": "Verifying T5577",
+                "content": {
+                    "type": "text",
+                    "lines": [
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "",
+                            "size": "medium",
+                            "align": "center"
+                        },
+                        {
+                            "text": "Verifying written data...",
+                            "size": "medium",
+                            "align": "center"
+                        }
+                    ]
+                },
+                "buttons": {
+                    "left": null,
+                    "right": null
+                },
+                "keys": {}
+            },
+            "transitions": {
+                "on_result.status==done": "clone_ok",
+                "on_result.status==error": "error",
+                "on_error": "error"
             }
         }
     }
