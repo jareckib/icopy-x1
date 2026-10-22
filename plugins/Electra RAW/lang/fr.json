@@ -39,5 +39,22 @@
     "No Tag Found\nCheck tag position.": "Aucun badge trouvé.\nVérifier sa position.",
     "OK - Read tag": "OK - Lire badge",
     "OK - Clone to T5577": "OK - Cloner T5577",
-    "OK - Clone next tag": "OK - Badge suivant"
+    "OK - Clone next tag": "OK - Badge suivant",
+    "T5577 not detected after write.\nCheck tag position.": "T5577 non détecté après écriture.\nVérifier sa position.",
+    "T5577 read configuration failed.": "Échec configuration lecture T5577.",
+    "Block {} read command failed.": "Échec commande lecture bloc {}.",
+    "Cannot read block {}.\nCheck tag position.": "Lecture impossible bloc {}.\nVérifier sa position.",
+    "Block {} mismatch.\nVerify failed.": "Bloc {} différent.\nÉchec vérification.",
+    "T5577 verification failed.": "Échec vérification T5577.",
+    "Writing T5577": "Écriture T5577",
+    "Writing RAW data...": "Écriture des données RAW...",
+    "Verifying T5577": "Vérification T5577",
+    "Verifying written data...": "Vérification des données...",
+    "Checking T5577": "Contrôle T5577",
+    "Checking tag...": "Contrôle du badge...",
+    "Detecting T5577": "Détection T5577",
+    "Detecting tag...": "Détection du badge...",
+    "LF check failed or timed out.": "Échec ou délai dépassé du contrôle LF.",
+    "No T55xx chipset found.\nCheck tag position.": "Puce T55xx introuvable.\nVérifier la position.",
+    "T5577 detection failed.\nCheck tag position.": "Détection T5577 échouée.\nVérifier la position."
 }
