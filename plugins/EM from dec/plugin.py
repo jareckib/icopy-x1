@@ -29,7 +29,6 @@ TIMEOUT_WRITE = 8000
 TIMEOUT_CLONE = 15000
 TIMEOUT_VERIFY = 3000
 
-
 def dec_to_hex_uid(dec_str):
     if not re.match(r'^\d{1,10}$', dec_str):
         return None
