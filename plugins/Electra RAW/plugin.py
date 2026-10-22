@@ -59,7 +59,9 @@ LAST_RAW_FILE = os.path.join(LAST_RAW_DIR, 'last_raw.txt')
 
 TIMEOUT_ACQUIRE  = 10000
 TIMEOUT_WRITE    = 8000
-TIMEOUT_DET      = 6000
+TIMEOUT_DET      = 15000
+TIMEOUT_PRECHECK = 5000
+TIMEOUT_VERIFY_DETECT = 15000  # Post-write detection can take longer
 
 BLOCK0_CONFIG = 0x00148080
 
@@ -186,18 +188,20 @@ def _tag_detected(output):
     return False
 
 def _extract_block_hex(output, block_num):
-    """Require an explicit numbered readback row; never parse error text."""
+    """Parse a numbered PM3 Page 0 block row, with or without '[+]'."""
     if not output:
         return None
+    page = None
     for line in output.splitlines():
-        match = re.search(
-            r'(?<![0-9])(?:0?[0-7])\s*\|\s*([0-9A-Fa-f]{8})(?![0-9A-Fa-f])',
-            line)
-        if match:
-            prefix = line[:match.start(1)].split('|')[0].strip()
-            prefix = re.sub(r'^\[.\w+\- ]+\]\s*', '', prefix).strip()
-            if prefix.isdigit() and int(prefix) == block_num:
-                return match.group(1).upper()
+        if re.search(r'\bPage\s+([01])\b', line, re.IGNORECASE):
+            page = int(re.search(r'\bPage\s+([01])\b', line, re.IGNORECASE).group(1))
+            continue
+        if page == 1:
+            continue
+        cleaned = re.sub(r'^\s*\[\s*\+\s*\]\s*', '', line).strip()
+        match = re.fullmatch(r'(0?[0-7])\s*\|\s*([0-9A-Fa-f]{8})\s*\|.*', cleaned)
+        if match and int(match.group(1)) == block_num:
+            return match.group(2).upper()
     return None
 
 class ElectraPlugin(object):
@@ -354,75 +358,117 @@ class ElectraPlugin(object):
         return True
 
     def _verify(self, b0, b1, b2, b3, b4):
-        # Force exact parameters from the verified device profile (ASK, RF/64, Offset 33, Seq Term)
-        # to guarantee immediate responses and prevent long auto-modulation searches on bad tags.
+        """Refresh post-write demod settings, then verify every written block."""
+        expected = (b0, b1, b2, b3, b4)
+        # Writing block 0 changes the tag configuration. Detect it again before
+        # reading; a successful PM3 command alone does not prove an RF read.
+        detected, detect_out = self._pm3('lf t55 detect', TIMEOUT_VERIFY_DETECT)
+        if not detected or not re.search(r'Chip\s*type[^\n]*T55', detect_out or '', re.I):
+            self.host.set_var('error_msg', 'T5577 not detected after write.\nCheck tag position.')
+            return False
+
+        # Keep the proven Electra read profile, as in the original plugin.
         configured, _ = self._pm3('lf t55 config --ASK --rate 64 -o 33 --st')
         if not configured:
+            self.host.set_var('error_msg', 'T5577 read configuration failed.')
             return False
-        
-        # Fast-fail check: read and verify block 0 first
-        ok0, o0 = self._pm3('lf t55 read -b 0')
-        r0 = _extract_block_hex(o0, 0)
-        if not ok0 or r0 != f"{b0:08X}":
-            return False  # Card is damaged or missing - abort immediately
 
-        # Read the remaining blocks using the forced active configuration
-        ok1, o1 = self._pm3('lf t55 read -b 1')
-        ok2, o2 = self._pm3('lf t55 read -b 2')
-        ok3, o3 = self._pm3('lf t55 read -b 3')
-        ok4, o4 = self._pm3('lf t55 read -b 4')
+        # A single dump reduces command overhead. Missing blocks are read
+        # individually, but mismatching values never count as success.
+        dump_ok, dump_out = self._pm3('lf t55 dump', TIMEOUT_ACQUIRE)
+        for number, value in enumerate(expected):
+            found = _extract_block_hex(dump_out, number) if dump_ok else None
+            if found is None:
+                read_ok, read_out = self._pm3('lf t55 read -b {}'.format(number), TIMEOUT_ACQUIRE)
+                if not read_ok:
+                    self.host.set_var('error_msg', 'Block {} read command failed.'.format(number))
+                    return False
+                found = _extract_block_hex(read_out, number)
+            if found is None:
+                self.host.set_var('error_msg', 'Cannot read block {}.\nCheck tag position.'.format(number))
+                return False
+            if found != '{:08X}'.format(value):
+                self.host.set_var('error_msg', 'Block {} mismatch.\nVerify failed.'.format(number))
+                return False
+        return True
 
-        r1 = _extract_block_hex(o1, 1)
-        r2 = _extract_block_hex(o2, 2)
-        r3 = _extract_block_hex(o3, 3)
-        r4 = _extract_block_hex(o4, 4)
+    def _clone_blocks(self):
+        raw = (self.host.get_var('electra_raw', '') or '').strip().upper()
+        if not _valid_electra_raw(raw):
+            self.host.set_var('error_msg', 'No valid Electra RAW.\nRead a tag first.')
+            return None
+        base = int(raw[:16], 16)
+        epi = int(raw[16:], 16)
+        return (BLOCK0_CONFIG, (base >> 32) & 0xFFFFFFFF,
+                base & 0xFFFFFFFF, (epi >> 32) & 0xFFFFFFFF,
+                epi & 0xFFFFFFFF)
 
-        return (
-            ok1 and ok2 and ok3 and ok4 and
-            r0 == f"{b0:08X}" and
-            r1 == f"{b1:08X}" and
-            r2 == f"{b2:08X}" and
-            r3 == f"{b3:08X}" and
-            r4 == f"{b4:08X}"
-        )
-
-    def do_clone_raw(self):
+    def do_prepare_clone(self):
         self.host.set_var('retry_action', 'clone')
         self.host.set_var('error_msg', '')
+        return {'status': 'ready' if self._clone_blocks() is not None else 'error'}
 
-        raw = (self.host.get_var('electra_raw', '') or '').strip().upper()
-
-        if not _valid_electra_raw(raw):
-            self.host.set_var(
-                'error_msg',
-                'No valid Electra RAW.\nRead a tag first.'
-            )
+    def do_precheck_clone(self):
+        """Fail closed if LF search does not positively identify a T55xx chipset."""
+        self.host.set_var('error_msg', '')
+        if self._clone_blocks() is None:
             return {'status': 'error'}
+        try:
+            ok, output = self._pm3('lf search', TIMEOUT_PRECHECK)
+        except Exception:
+            ok, output = False, ''
+        if not ok:
+            self.host.set_var('error_msg', 'LF check failed or timed out.')
+            return {'status': 'error'}
+        if not re.search(r'\bChipset\s*\.{0,4}\s*[:=]?\s*T55(?:xx|x7|57|77)\b',
+                         output or '', re.IGNORECASE):
+            self.host.set_var('error_msg', 'No T55xx chipset found.\nCheck tag position.')
+            return {'status': 'error'}
+        return {'status': 'ok'}
 
-        base_hex = raw[0:16]
-        epi_hex  = raw[16:32]
+    def do_detect_clone(self):
+        """Confirm T5577 after precheck, before issuing any write command."""
+        self.host.set_var('error_msg', '')
+        try:
+            ok, output = self._pm3('lf t55xx detect', TIMEOUT_DET)
+        except Exception:
+            ok, output = False, ''
+        if not ok or not re.search(r'Chip\s*type[^\n]*T55x7\b', output or '', re.I):
+            self.host.set_var('error_msg', 'T5577 detection failed.\nCheck tag position.')
+            return {'status': 'error'}
+        return {'status': 'ok'}
 
-        encoded_base = int(base_hex, 16)
-        encoded_epi  = int(epi_hex, 16)
-
-        b0 = BLOCK0_CONFIG
-        b1 = (encoded_base >> 32) & 0xFFFFFFFF
-        b2 = encoded_base & 0xFFFFFFFF
-        b3 = (encoded_epi >> 32) & 0xFFFFFFFF
-        b4 = encoded_epi & 0xFFFFFFFF
-
-        if not self._write_blocks(b0, b1, b2, b3, b4):
+    def do_write_raw(self):
+        self.host.set_var('error_msg', '')
+        blocks = self._clone_blocks()
+        if blocks is None:
+            return {'status': 'error'}
+        if not self._write_blocks(*blocks):
             self.host.set_var('error_msg', 'Replace T5577 tag.\nWrite failed.')
             return {'status': 'error'}
+        return {'status': 'written'}
 
-        if not self._verify(b0, b1, b2, b3, b4):
-            self.host.set_var('error_msg', 'Replace T5577 tag.\nVerify failed.')
+    def do_verify_raw(self):
+        blocks = self._clone_blocks()
+        if blocks is None:
             return {'status': 'error'}
-
+        if not self._verify(*blocks):
+            if not self.host.get_var('error_msg', ''):
+                self.host.set_var('error_msg', 'T5577 verification failed.')
+            return {'status': 'error'}
         count = int(self.host.get_var('clone_count', '0')) + 1
         self.host.set_var('clone_count', str(count))
-
         return {'status': 'done'}
+
+    def do_clone_raw(self):
+        # Compatibility entry point for callers outside ui.json.
+        result = self.do_prepare_clone()
+        if result['status'] != 'ready':
+            return result
+        result = self.do_write_raw()
+        if result['status'] != 'written':
+            return result
+        return self.do_verify_raw()
 
     def do_error_retry(self):
         action = self.host.get_var('retry_action', '')
@@ -431,7 +477,7 @@ class ElectraPlugin(object):
         if action == 'load':
             return self.do_show_last_raw()
         if action == 'clone':
-            return self.do_clone_raw()
+            return self.do_prepare_clone()
         self.host.set_var('error_msg', 'Nothing to retry.')
         return {'status': 'error'}
 
