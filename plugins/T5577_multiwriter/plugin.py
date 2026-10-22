@@ -32,7 +32,7 @@ from lib.input_hex import FreeHexInput
 TIMEOUT_READ  = 10000
 TIMEOUT_WRITE = 8000
 TIMEOUT_PRECHECK = 5000
-TIMEOUT_DET   = 115000  # Long PM3 detect; below rftask 120 s limit
+TIMEOUT_DET   = 15000  # Long PM3 detect
 
 BLOCK0 = {1: '00148040', 2: '00148080', 3: '001480C0'}
 
