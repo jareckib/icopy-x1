@@ -53,6 +53,8 @@ iCopy-X adaptation and integration by @jareckib (Jarek Barwinski).
 
 import re
 import os
+import time
+import functools
 
 LAST_RAW_DIR  = '/mnt/upan/dump/electra'
 LAST_RAW_FILE = os.path.join(LAST_RAW_DIR, 'last_raw.txt')
@@ -203,6 +205,23 @@ def _extract_block_hex(output, block_num):
         if match and int(match.group(1)) == block_num:
             return match.group(2).upper()
     return None
+
+def _minimum_progress_display(handler):
+    """Keep a run: progress screen visible for at least two seconds.
+
+    Only use on background RFID operations, never on synchronous call: UI actions.
+    """
+    @functools.wraps(handler)
+    def wrapped(self, *args, **kwargs):
+        started = time.monotonic()
+        try:
+            return handler(self, *args, **kwargs)
+        finally:
+            remaining = 2.0 - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+    return wrapped
+
 
 class ElectraPlugin(object):
 
@@ -408,6 +427,7 @@ class ElectraPlugin(object):
         self.host.set_var('error_msg', '')
         return {'status': 'ready' if self._clone_blocks() is not None else 'error'}
 
+    @_minimum_progress_display
     def do_precheck_clone(self):
         """Fail closed if LF search does not positively identify a T55xx chipset."""
         self.host.set_var('error_msg', '')
@@ -426,6 +446,7 @@ class ElectraPlugin(object):
             return {'status': 'error'}
         return {'status': 'ok'}
 
+    @_minimum_progress_display
     def do_detect_clone(self):
         """Confirm T5577 after precheck, before issuing any write command."""
         self.host.set_var('error_msg', '')
@@ -438,6 +459,7 @@ class ElectraPlugin(object):
             return {'status': 'error'}
         return {'status': 'ok'}
 
+    @_minimum_progress_display
     def do_write_raw(self):
         self.host.set_var('error_msg', '')
         blocks = self._clone_blocks()
@@ -448,6 +470,7 @@ class ElectraPlugin(object):
             return {'status': 'error'}
         return {'status': 'written'}
 
+    @_minimum_progress_display
     def do_verify_raw(self):
         blocks = self._clone_blocks()
         if blocks is None:
