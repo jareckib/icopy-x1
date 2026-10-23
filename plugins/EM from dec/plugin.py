@@ -21,8 +21,19 @@ The plugin converts it to a hex UID, encodes EM4102 and clones to T5577.
 """
 
 import re
+import time
 
 from lib.input_dec import FreeDecInput
+
+MIN_STATUS_SECONDS = 2.0
+
+
+def _status_pause(started):
+    """Keep a background progress screen visible for at least 2 seconds."""
+    remaining = MIN_STATUS_SECONDS - (time.monotonic() - started)
+    if remaining > 0:
+        time.sleep(remaining)
+
 
 TIMEOUT_WRITE = 8000
 TIMEOUT_CLONE = 15000
@@ -122,63 +133,83 @@ class Em4102DecPlugin(object):
         return {'status': 'error'}
 
     def do_quick_search(self):
-        """Short preliminary LF scan; never treat an EM ID as proof of T5577."""
-        self.host.set_var('error_msg', '')
+        _status_started = time.monotonic()
         try:
-            ok, output = self._pm3('lf search', TIMEOUT_SEARCH)
-        except Exception:
-            return self._error('LF search timed out or failed.')
-        if not ok:
-            return self._error('LF search timed out or failed.')
-        # A blank/unconfigured T5577 may not expose an EM410x ID.
-        # The following detect step makes the final T55x7 decision.
-        if re.search(r'\b(?:BUSY|timeout|timed out)\b', output or '', re.IGNORECASE):
-            return self._error('LF search timed out or failed.')
-        return {'status': 'ok'}
+            """Short preliminary LF scan; never treat an EM ID as proof of T5577."""
+            self.host.set_var('error_msg', '')
+            try:
+                ok, output = self._pm3('lf search', TIMEOUT_SEARCH)
+            except Exception:
+                return self._error('LF search timed out or failed.')
+            if not ok:
+                return self._error('LF search timed out or failed.')
+            # A blank/unconfigured T5577 may not expose an EM410x ID.
+            # The following detect step makes the final T55x7 decision.
+            if re.search(r'\b(?:BUSY|timeout|timed out)\b', output or '', re.IGNORECASE):
+                return self._error('LF search timed out or failed.')
+            return {'status': 'ok'}
+        finally:
+            _status_pause(_status_started)
+
 
     def do_precheck(self):
-        self.host.set_var('error_msg', '')
-        uid = self.host.get_var('hex_uid', '')
-        if not re.fullmatch(r'[0-9A-Fa-f]{10}', uid or '') or int(uid, 16) == 0:
-            return self._error('No valid UID.')
+        _status_started = time.monotonic()
         try:
-            ok, output = self._pm3('lf t55xx detect', TIMEOUT_DETECT)
-        except Exception:
-            return self._error('T5577 detection timed out or failed.')
-        if not ok:
-            return self._error('T5577 detection timed out or failed.')
-        if not re.search(r'Chip type\.{2,}\s*T55x7\b', output or '', re.IGNORECASE):
-            return self._error('T5577 not detected.\nCheck tag position.')
-        return {'status': 'ok'}
+            self.host.set_var('error_msg', '')
+            uid = self.host.get_var('hex_uid', '')
+            if not re.fullmatch(r'[0-9A-Fa-f]{10}', uid or '') or int(uid, 16) == 0:
+                return self._error('No valid UID.')
+            try:
+                ok, output = self._pm3('lf t55xx detect', TIMEOUT_DETECT)
+            except Exception:
+                return self._error('T5577 detection timed out or failed.')
+            if not ok:
+                return self._error('T5577 detection timed out or failed.')
+            if not re.search(r'Chip type\.{2,}\s*T55x7\b', output or '', re.IGNORECASE):
+                return self._error('T5577 not detected.\nCheck tag position.')
+            return {'status': 'ok'}
+        finally:
+            _status_pause(_status_started)
+
 
     def do_write(self):
-        uid = self.host.get_var('hex_uid', '')
-        if not re.fullmatch(r'[0-9A-Fa-f]{10}', uid or '') or int(uid, 16) == 0:
-            return self._error('No valid UID.')
+        _status_started = time.monotonic()
         try:
-            ok, output = self._pm3('lf em 410x clone --id {}'.format(uid.upper()), TIMEOUT_CLONE)
-        except Exception:
-            return self._error('Clone command timed out or failed.')
-        if not ok or re.search(r'\[(?:-|!)\]|\b(?:error|failed|timeout)\b', output or '', re.IGNORECASE):
-            return self._error('Clone failed.\nCheck T5577 position.')
-        return {'status': 'ok'}
+            uid = self.host.get_var('hex_uid', '')
+            if not re.fullmatch(r'[0-9A-Fa-f]{10}', uid or '') or int(uid, 16) == 0:
+                return self._error('No valid UID.')
+            try:
+                ok, output = self._pm3('lf em 410x clone --id {}'.format(uid.upper()), TIMEOUT_CLONE)
+            except Exception:
+                return self._error('Clone command timed out or failed.')
+            if not ok or re.search(r'\[(?:-|!)\]|\b(?:error|failed|timeout)\b', output or '', re.IGNORECASE):
+                return self._error('Clone failed.\nCheck T5577 position.')
+            return {'status': 'ok'}
+        finally:
+            _status_pause(_status_started)
+
 
     def do_verify(self):
-        uid = (self.host.get_var('hex_uid', '') or '').upper()
+        _status_started = time.monotonic()
         try:
-            ok, output = self._pm3('lf em 410x reader', TIMEOUT_VERIFY)
-        except Exception:
-            return self._error('Verification command timed out or failed.')
-        if not ok:
-            return self._error('Verification command timed out or failed.')
-        read_id = _extract_em410x_id(output)
-        if read_id is None:
-            return self._error('Verify failed.\nCheck T5577 position.')
-        if read_id != uid:
-            return self._error('Verification mismatch.\nCheck T5577 position.')
-        try:
-            count = int(self.host.get_var('clone_count', '0')) + 1
-        except (TypeError, ValueError):
-            count = 1
-        self.host.set_var('clone_count', str(count))
-        return {'status': 'done'}
+            uid = (self.host.get_var('hex_uid', '') or '').upper()
+            try:
+                ok, output = self._pm3('lf em 410x reader', TIMEOUT_VERIFY)
+            except Exception:
+                return self._error('Verification command timed out or failed.')
+            if not ok:
+                return self._error('Verification command timed out or failed.')
+            read_id = _extract_em410x_id(output)
+            if read_id is None:
+                return self._error('Verify failed.\nCheck T5577 position.')
+            if read_id != uid:
+                return self._error('Verification mismatch.\nCheck T5577 position.')
+            try:
+                count = int(self.host.get_var('clone_count', '0')) + 1
+            except (TypeError, ValueError):
+                count = 1
+            self.host.set_var('clone_count', str(count))
+            return {'status': 'done'}
+        finally:
+            _status_pause(_status_started)
+
