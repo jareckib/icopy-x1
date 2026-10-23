@@ -337,7 +337,7 @@
             }
         },
         "verifying": {
-            "on_enter": "run:do_verify",
+            "on_enter": "run:do_verify_visible",
             "screen": {
                 "title": "Verifying...",
                 "content": {
@@ -430,6 +430,9 @@
                     "type": "text",
                     "lines": [
                         {
+                            "text": ""
+                        },
+                        {
                             "text": "{error_msg}",
                             "size": "medium",
                             "align": "center"
@@ -472,6 +475,9 @@
                     "type": "text",
                     "lines": [
                         {
+                            "text": ""
+                        },
+                        {
                             "text": "{error_msg}",
                             "size": "medium",
                             "align": "center"
@@ -508,6 +514,9 @@
                 "content": {
                     "type": "text",
                     "lines": [
+                        {
+                            "text": ""
+                        },
                         {
                             "text": "{error_msg}",
                             "size": "medium",
@@ -546,6 +555,9 @@
                     "type": "text",
                     "lines": [
                         {
+                            "text": ""
+                        },
+                        {
                             "text": "{error_msg}",
                             "size": "medium",
                             "align": "center"
@@ -583,6 +595,9 @@
                     "type": "text",
                     "lines": [
                         {
+                            "text": ""
+                        },
+                        {
                             "text": "{error_msg}",
                             "size": "medium",
                             "align": "center"
@@ -617,7 +632,7 @@
             }
         },
         "checking_tag": {
-            "on_enter": "run:do_precheck",
+            "on_enter": "run:do_precheck_visible",
             "screen": {
                 "title": "Checking LF tag",
                 "content": {
@@ -657,7 +672,7 @@
             }
         },
         "detecting_tag": {
-            "on_enter": "run:do_detect",
+            "on_enter": "run:do_detect_visible",
             "screen": {
                 "title": "Detecting T5577",
                 "content": {
@@ -702,7 +717,7 @@
             }
         },
         "writing": {
-            "on_enter": "run:do_write",
+            "on_enter": "run:do_write_visible",
             "screen": {
                 "title": "Writing T5577",
                 "content": {
