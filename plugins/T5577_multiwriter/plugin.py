@@ -26,13 +26,14 @@ Supports:
 """
 
 import re
+import time
 from lib.input_dec import FreeDecInput
 from lib.input_hex import FreeHexInput
 
 TIMEOUT_READ  = 10000
 TIMEOUT_WRITE = 8000
 TIMEOUT_PRECHECK = 5000
-TIMEOUT_DET   = 15000  # Long PM3 detect
+TIMEOUT_DET   = 115000  # Long PM3 detect; below rftask 120 s limit
 
 BLOCK0 = {1: '00148040', 2: '00148080', 3: '001480C0'}
 
@@ -426,6 +427,29 @@ class T55xxMultiwriterPlugin(object):
                 'No T55xx chipset found.\nCheck tag and position.'))
             return {'status': 'error'}
         return {'status': 'ok'}
+
+    # Keep progress screens visible for at least two seconds. These wrappers
+    # are invoked through run: (worker thread), never through call: (UI thread).
+    def _progress_min_2s(self, handler):
+        start = time.monotonic()
+        try:
+            return handler()
+        finally:
+            remaining = 2.0 - (time.monotonic() - start)
+            if remaining > 0:
+                time.sleep(remaining)
+
+    def do_precheck_visible(self):
+        return self._progress_min_2s(self.do_precheck)
+
+    def do_detect_visible(self):
+        return self._progress_min_2s(self.do_detect)
+
+    def do_write_visible(self):
+        return self._progress_min_2s(self.do_write)
+
+    def do_verify_visible(self):
+        return self._progress_min_2s(self.do_verify)
 
     # -- Write to T5577 ---------------------------------------------------
 
