@@ -1,7 +1,7 @@
 {
     "T5577 Multiwriter": "T5577 Multiwriter",
     "Initializing...": "Initialisation…",
-    "Add UID in HEX, DEC": "Saisir UID HEX/DEC",
+    "Add UID in HEX, DEC": "Ajouter UID HEX/DEC",
     "or Read EM": "ou lire un badge EM",
     "OK - Read original fob": "OK - Lire badge original",
     "Add UID": "Ajouter un UID",
@@ -45,7 +45,7 @@
     "Enter a digit.": "Saisir un chiffre.",
     "ID cannot be all zeros.": "ID : zéros interdits.",
     "Conversion failed.": "Échec de la conversion.",
-    "Enter hex characters.": "Saisir des chiffres HEX.",
+    "Enter hex characters.": "Saisir des caractères HEX.",
     "Invalid length.\nMust be exactly 10 hex (EM4102).": "Longueur incorrecte.\n10 chiffres HEX requis.",
     "UID cannot be all zeros.": "UID : zéros interdits.",
     "No EM410x tag detected.\nAdjust position and retry.": "Aucun tag EM410x.\nReplacer et réessayer.",
@@ -80,11 +80,11 @@
     "No LF tag detected.": "Aucun tag LF détecté.",
     "T5577 detection failed.": "Échec de la détection T5577.",
     "Checking tag...": "Vérification du tag…",
-    "Please keep tag on reader": "Laisser le tag sur le lecteur",
+    "Please keep tag on reader": "Laisser le tag sur lecteur",
     "Add": "Ajouter",
-    "Quick check: up to 5 seconds": "Test rapide : 5 s max.",
-    "Keep tag on reader": "Garder tag sur lecteur",
-    "This may take up to 115 seconds": "Jusqu’à 115 secondes",
+    "Quick check: up to 5 seconds": "Recherche : 5 s max.",
+    "Keep tag on reader": "Garder T5577 sur lecteur",
+    "This may take up to 115 seconds": "Durée max. : 115 s",
     "UID{}: {}": "UID{} : {}",
     "T5577 detection timed out or communication failed.\nWait for PM3 to become ready before Retry.": "Délai de détection T5577 dépassé ou erreur de communication.\nAttendre que PM3 soit prêt avant de réessayer.",
     "T5577 detection failed.\nCheck tag and position.": "Échec de détection T5577.\nVérifier le tag et sa position.",
@@ -98,5 +98,8 @@
     "No LF tag decoded.\nCheck tag and position.": "Tag LF non reconnu.\nVérifier sa position.",
     "Cannot detect T5577 after write.\nVerification failed.": "T5577 non détecté après écriture.\nÉchec de la vérification.",
     "Cannot read block {}.\nVerification failed.": "Lecture impossible du bloc {}.\nÉchec de la vérification.",
-    "No T55xx chipset found.\nCheck tag and position.": "Puce T55xx introuvable.\nVérifier le tag et sa position."
+    "No T55xx chipset found.\nCheck tag and position.": "Puce T55xx introuvable.\nVérifier le tag et sa position.",
+    "Confirm Clone": "Confirmer clonage",
+    "Block 0: {}": "Bloc 0 : {}",
+    "Block 0: --------": "Bloc 0 : --------"
 }
