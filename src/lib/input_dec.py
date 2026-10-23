@@ -68,6 +68,8 @@ will change -- wherever the cursor happens to be.
 Copyright (c) 2026: jareckib
 """
 
+import threading
+
 from lib._constants import SCREEN_W, CONTENT_Y0, CONTENT_H
 from lib import resources
 
@@ -88,7 +90,8 @@ class FreeDecInput(object):
         self._canvas = canvas
         self._label = label
         self._hint = hint
-        self._max_length = max_length
+        self._max_length = max(1, int(max_length))
+        self._owner_thread = threading.get_ident()
         self._x0 = x0
         self._font = resources.get_font(font_size)
         self._hint_font = resources.get_font(hint_font_size)
@@ -97,6 +100,28 @@ class FreeDecInput(object):
         self._text_color = text_color
         self._digits = ['0']
         self._cursor = 0
+
+    def _check_ui_thread(self):
+        return  # Existing plugin is responsible for UI-thread scheduling
+
+    def _fits(self, value):
+        """Measure the actual rendered label + digits, not character count."""
+        available = SCREEN_W - self._x0 - 4
+        if available <= 0:
+            return False
+        return self._text_width(self._label + value) <= available
+
+    def _text_width(self, text):
+        """Measure text with the actual Canvas font, not a font-spec string."""
+        if not text:
+            return 0
+        item = self._canvas.create_text(0, 0, text=text, font=self._font,
+                                        anchor='w', tags='_input_measure')
+        try:
+            rect = self._canvas.bbox(item)
+            return rect[2] - rect[0] if rect else 0
+        finally:
+            self._canvas.delete(item)
 
     # -- public API ------------------------------------------------
 
@@ -114,6 +139,7 @@ class FreeDecInput(object):
         self._redraw()
 
     def hide(self):
+        self._check_ui_thread()
         self._canvas.delete(TAG)
 
     def rollUp(self):
@@ -134,7 +160,7 @@ class FreeDecInput(object):
     def moveRight(self):
         if self._cursor < len(self._digits) - 1:
             self._cursor += 1
-        elif len(self._digits) < self._max_length:
+        elif len(self._digits) < self._max_length and self._fits(''.join(self._digits) + '0'):
             self._digits.append('0')
             self._cursor += 1
         # already at max_length and at the edge: nowhere further to grow
@@ -150,6 +176,7 @@ class FreeDecInput(object):
     # -- drawing -----------------------------------------------------
 
     def _redraw(self):
+        self._check_ui_thread()
         canvas = self._canvas
         canvas.delete(TAG)
 
@@ -159,14 +186,19 @@ class FreeDecInput(object):
                 x, self._y_offset, text=self._label, fill=LABEL_COLOR,
                 font=self._font, anchor='w', tags=TAG,
             )
-            x = canvas.bbox(item)[2]
+            bbox = canvas.bbox(item)
+            if bbox:
+                x = bbox[2]
 
         for i, ch in enumerate(self._digits):
             item = canvas.create_text(
                 x, self._y_offset, text=ch, fill=self._text_color,
                 font=self._font, anchor='w', tags=TAG,
             )
-            x0, y0, x1, y1 = canvas.bbox(item)
+            bbox = canvas.bbox(item)
+            if not bbox:
+                continue
+            x0, y0, x1, y1 = bbox
             if i == self._cursor:
                 canvas.create_line(
                     x0, y1 + 2, x1, y1 + 2,
