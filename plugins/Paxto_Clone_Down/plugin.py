@@ -11,16 +11,15 @@
 #
 # This entire header "Required Notice" must remain in place.
 ##########################################################################
-"""
-Paxton Clone&Down plugin for iCopy-XS
-Clone Paxton tags to PCF7936 or downgrade them to EM4102-compatible T5577 tags.
-Includes tag reading, write verification, and log management.
-Copyright (c) 2026: jareckib
-"""
+"""Paxton Clone&Down plugin for iCopy-XS"""
 
 import re
 import os
 import tempfile
+import time
+import functools
+
+
 
 from lib._constants import SCREEN_W
 from lib import resources
@@ -33,6 +32,8 @@ LOG_PATH = os.path.join(DUMP_DIR, 'Paxton_log.txt')
 READ_TIMEOUT = 20000
 WRITE_TIMEOUT = 10000
 CLONE_TIMEOUT = 15000
+SEARCH_TIMEOUT = 5000
+VERIFY_TIMEOUT = 5000
 
 PICK_ROWS = 8
 LOG_SEP = '--------------------------'
@@ -277,6 +278,8 @@ class PaxtonCloneDownPlugin(object):
         self._txt_mode = None
         self._pending_log_name = ''
         self._pending_find_query = ''
+        self._paxton_search_output = ''
+        self._paxton_search_chipset = ''
 
     def _tr(self, template, *args):
         """Translate the unformatted template, then apply arguments."""
@@ -286,8 +289,15 @@ class PaxtonCloneDownPlugin(object):
             value = template
         return value.format(*args) if args else value
 
+
     def _pm3(self, cmd, timeout=WRITE_TIMEOUT):
         return self.host.pm3_command(cmd, timeout=timeout)
+
+    @staticmethod
+    def _pm3_failed(ok, out):
+        return (not ok or bool(re.search(
+            r'(?i)\b(?:BUSY|timeout|timed out|connection lost|device disconnected)\b', out or ''))
+            or bool(re.search(r'(?im)^\s*\[-\]\s*(?:error|failed)\b', out or '')))
 
     def _toast(self, text):
         try:
@@ -307,7 +317,8 @@ class PaxtonCloneDownPlugin(object):
         for k in ('error_msg', 'err_return', 'flow', 'uid', 'tag_variant',
                   'em_id', 'id_line', 'block4', 'block5', 'block6', 'block7',
                   'src_name', 'src_line', 'saved_name', 'dump_line',
-                  'pick_pos', 'pick_view', 'txt_charset'):
+                  'pick_pos', 'pick_view', 'txt_charset', 'detected_type',
+                  'detected_chipset', 'detected_uid', 'paxton_status'):
             s(k, '')
         s('clone_count', '0')
         s('down_count', '0')
@@ -315,7 +326,7 @@ class PaxtonCloneDownPlugin(object):
         s('err_retry_kind', 'normal')
         self._txt = None
         self._txt_mode = None
-        self._clear_mode_label()
+        # Initialization may run in a worker; do not touch Tk Canvas here.
 
     def _clear_read_write_cache(self):
         for k in ('uid', 'tag_variant', 'em_id', 'id_line',
@@ -451,87 +462,227 @@ class PaxtonCloneDownPlugin(object):
     def do_read_down(self):
         return self._do_read('down', True)
 
-    def do_clone_paxton(self):
+    def do_prepare_paxton(self):
+        self._paxton_verified = False
         self.host.set_var('flow', 'clone')
         blocks = self._get_blocks()
         if not self._blocks_ok(blocks):
             return self._fail('No valid block data.\nRead a fob first.', 'menu')
-        self._toast(self._tr('Writing fob...'))
+        self._paxton_write_blocks = blocks
+        return {'status': 'ok'}
+
+    def do_search_pcf7936(self):
+        """Identify a destination without writing; lf search is not proof of Paxton auth."""
+        self.host.set_var('detected_type', 'Unknown')
+        self.host.set_var('detected_chipset', 'Unknown')
+        self.host.set_var('detected_uid', '-')
+        self.host.set_var('paxton_status', self._tr('Paxton not detected'))
+        self._paxton_verified = False
+        self.host.set_var('paxton_detail', '')
+        self._paxton_search_output = ''
+        self._paxton_search_chipset = ''
+        try:
+            ok, out = self._pm3('lf search', SEARCH_TIMEOUT)
+        except Exception:
+            return self._fail('LF search failed or timed out.', 'readed_clone')
+        if not ok or re.search(r'\b(?:BUSY|timeout|timed out)\b', out or '', re.I):
+            return self._fail('LF search failed or timed out.', 'readed_clone')
+        self._paxton_search_output = out or ''
+        for key, pattern in (
+            ('detected_type', r'(?im)^\s*\[\+\]\s*TYPE\.{2,}\s*(.+?)\s*$'),
+            ('detected_chipset', r'(?im)^\s*\[\+\]\s*Chipset\.{2,}\s*(.+?)\s*$'),
+            ('detected_uid', r'(?im)^\s*\[\+\]\s*UID\.{2,}\s*([0-9A-Fa-f]+)\s*$'),
+        ):
+            m = re.search(pattern, out or '')
+            if m:
+                self.host.set_var(key, m.group(1).strip())
+        # Use the same extracted chipset for display and the safety decision.
+        chipset = (self.host.get_var('detected_chipset', '') or '').strip()
+        self._paxton_search_chipset = chipset
+        if re.fullmatch(r'T55(?:xx|x7|77)', chipset, re.I):
+            self.host.set_var('paxton_status', self._tr('Paxton not detected. Write rejected.'))
+            return {'status': 'info'}
+        # Never identify an unrelated known chipset as a Hitag2 candidate.
+        if chipset and chipset.lower() not in ('unknown', 'hitag 2', 'hitag2'):
+            self.host.set_var('paxton_status', self._tr('Paxton not detected. Write rejected.'))
+            return {'status': 'info'}
+        return {'status': 'candidate'}
+
+    def do_detect_pcf7936(self):
+        """Check the destination fob before writing any Hitag2 blocks."""
+        blocks = getattr(self, '_paxton_write_blocks', None)
+        if not blocks or not self._blocks_ok(blocks):
+            return self._fail('No valid block data.\nRead a fob first.', 'readed_clone')
+        # Second guard: no Hitag command after a positive T55xx detection.
+        chipset = (getattr(self, '_paxton_search_chipset', '') or '').strip()
+        if re.fullmatch(r'T55(?:xx|x7|77)', chipset, re.I):
+            self.host.set_var('paxton_status', self._tr('Paxton not detected. Write rejected.'))
+            return {'status': 'info'}
+        try:
+            ok, out = self._pm3('lf hitag info -k {}'.format(PAXTON_KEY), READ_TIMEOUT)
+        except Exception:
+            return self._fail('Hitag2 communication error.\nCheck fob position.', 'readed_clone')
+        out = out or ''
+        # Do not classify a transport failure or an incomplete response as a
+        # different password. A PCF7936 detected by lf search is only a candidate.
+        if not ok or re.search(r'\b(?:BUSY|timeout|timed out)\b', out, re.I):
+            return self._fail('Hitag2 communication error.\nCheck fob position.', 'readed_clone')
+        type_ok = bool(re.search(r'(?im)^\s*(?:\[\+\]\s*)?TYPE\.{2,}\s*PCF\s*7936\b', out))
+        config_ok = bool(re.search(r'(?im)^\s*(?:\[=\]\s*)?Configuration read with password\s+' + re.escape(PAXTON_KEY) + r'\b', out))
+        if type_ok and config_ok:
+            self.host.set_var('detected_type', 'PCF 7936')
+            self.host.set_var('detected_chipset', 'Hitag 2')
+            uid = _parse_uid(out) or _parse_uid(self._paxton_search_output)
+            if uid:
+                self.host.set_var('detected_uid', uid)
+                self.host.set_var('uid', uid)
+            self._paxton_verified = True
+            self.host.set_var('paxton_status', self._tr('Paxton detected'))
+            return {'status': 'ok'}
+        # Authentication was not established. We cannot prove a different
+        # password solely from a failed read; describe it as unconfirmed.
+        self._paxton_verified = False
+        self.host.set_var('paxton_status', self._tr('Paxton not detected. Write rejected.'))
+        return {'status': 'info'}
+
+    def do_write_paxton(self):
+        if not getattr(self, '_paxton_verified', False):
+            return self._fail('Paxton not confirmed.\nWrite rejected.', 'readed_clone')
+        self._paxton_verified = False
+        blocks = getattr(self, '_paxton_write_blocks', None)
+        if not blocks or not self._blocks_ok(blocks):
+            return self._fail('No valid block data.\nRead a fob first.', 'menu')
         for page in range(4, 8):
             cmd = 'lf hitag wrbl --ht2 -p {} -d {} -k {}'.format(page, blocks[page], PAXTON_KEY)
-            ok, _ = self._pm3(cmd, WRITE_TIMEOUT)
-            if not ok:
+            ok, out = self._pm3(cmd, WRITE_TIMEOUT)
+            if self._pm3_failed(ok, out):
                 return self._fail(
                     self._tr('PCF7936 block {} failed\nCheck fob position', page),
-                    'readed_clone',
-                    retry_action='do_clone_paxton',
-                    retry_kind='write_retry'
-                )
+                    'readed_clone', retry_kind='write_retry')
+        return {'status': 'ok'}
+
+    def do_verify_paxton(self):
+        blocks = getattr(self, '_paxton_write_blocks', None)
+        if not blocks:
+            return self._fail('No valid block data.', 'readed_clone')
         read_blocks, uid, typ, out = self._read_blocks()
         if read_blocks is None:
-            return self._fail(
-                'PCF7936 verify failed.\nCheck fob position.',
-                'readed_clone',
-                retry_action='do_clone_paxton',
-                retry_kind='write_retry'
-            )
+            return self._fail('PCF7936 verify failed.\nCheck fob position.',
+                              'readed_clone', retry_kind='write_retry')
         failed = [str(i) for i in range(4, 8) if read_blocks.get(i, '') != blocks.get(i, '')]
         if failed:
             return self._fail(
                 self._tr('Verify failed:\nblock {} differs.\nAdjust and retry.', ', '.join(failed)),
-                'readed_clone',
-                retry_action='do_clone_paxton',
-                retry_kind='write_retry'
-            )
+                'readed_clone', retry_kind='write_retry')
         count = int(self.host.get_var('clone_count', '0') or '0') + 1
         self.host.set_var('clone_count', str(count))
         return {'status': 'done'}
 
-    def do_clone_em4102(self):
+    def do_clone_paxton(self):
+        # Compatibility for any external callers; the UI uses staged screens.
+        result = self.do_prepare_paxton()
+        if result.get('status') != 'ok':
+            return result
+        result = self.do_search_pcf7936()
+        if result.get('status') != 'candidate':
+            return result
+        result = self.do_detect_pcf7936()
+        if result.get('status') != 'ok':
+            return result
+        result = self.do_write_paxton()
+        if result.get('status') != 'ok':
+            return result
+        return self.do_verify_paxton()
+
+    def do_prepare_em4102(self):
         self.host.set_var('flow', 'down')
         em_id = self.host.get_var('em_id', '')
-        if not re.match(r'^[0-9A-Fa-f]{10}$', em_id or ''):
+        if not re.fullmatch(r'[0-9A-Fa-f]{10}', em_id or ''):
             return self._fail('No valid EM4102 ID.\nRead a Paxton fob.', 'menu')
-        self._toast(self._tr('Writing T5577...'))
-        ok, out = self._pm3('lf em 410x clone --id {}'.format(em_id), CLONE_TIMEOUT)
-        if not ok:
-            return self._fail(
-                'T5577 write failed.\nCheck tag position.',
-                'readed_down',
-                retry_action='do_clone_em4102',
-                retry_kind='write_retry'
-            )
+        self._pending_em_id = em_id.upper()
+        return {'status': 'ok'}
 
-        # Use the same public command as the tested EM4102 and Multiwriter
-        # plugins. pm3_compat translates it for legacy firmware as needed.
-        ok2, out2 = self._pm3('lf em 410x reader', READ_TIMEOUT)
+    def do_quick_search_t5577(self):
+        """Only a fresh, positive LF T55xx identification permits detect."""
+        started = time.monotonic()
+        try:
+            ok, out = self._pm3('lf search', SEARCH_TIMEOUT)
+        except Exception as exc:
+            return self._fail('LF search failed or timed out.', 'readed_down', retry_kind='t55_scan')
+        failed = self._pm3_failed(ok, out)
+        chipset = re.search(
+            r'(?im)^\s*(?:\[\+\]\s*)?Chipset\s*\.{2,}\s*(T55xx|T55x7|T5577)\b',
+            out or ''
+        )
+        if failed:
+            return self._fail('LF search failed or timed out.', 'readed_down', retry_kind='t55_scan')
+        if not chipset:
+            return self._fail('T5577 not detected.\nCheck tag position.',
+                              'readed_down', retry_kind='t55_scan')
+        return {'status': 'ok'}
+
+    def do_detect_t5577(self):
+        started = time.monotonic()
+        try:
+            ok, out = self._pm3('lf t55xx detect', CLONE_TIMEOUT)
+        except Exception as exc:
+            return self._fail('T5577 detection failed.\nRetry with the tag.',
+                              'readed_down', retry_kind='t55_scan')
+        matched = bool(re.search(r'(?im)\bChip\s+type\s*\.{2,}\s*T55(?:x7|77)\b', out or ''))
+        failed = self._pm3_failed(ok, out)
+        if failed or not matched:
+            return self._fail('T5577 not detected.\nCheck tag position.',
+                              'readed_down', retry_kind='t55_scan')
+        return {'status': 'ok'}
+
+    def do_write_em4102(self):
+        em_id = getattr(self, '_pending_em_id', '')
+        if not re.fullmatch(r'[0-9A-F]{10}', em_id):
+            return self._fail('No valid EM4102 ID.\nRead a Paxton fob.', 'readed_down')
+        ok, out = self._pm3('lf em 410x clone --id {}'.format(em_id), CLONE_TIMEOUT)
+        if self._pm3_failed(ok, out):
+            return self._fail('T5577 write failed.\nCheck tag position.',
+                              'readed_down', retry_kind='write_retry')
+        return {'status': 'ok'}
+
+    def do_verify_em4102(self):
+        """Read back the EM410x ID; never treat command success as verification."""
+        em_id = getattr(self, '_pending_em_id', '')
+        if not re.fullmatch(r'[0-9A-F]{10}', em_id):
+            return self._fail('No valid EM4102 ID.\nRead a Paxton fob.', 'readed_down')
+        started = time.monotonic()
+        try:
+            ok, out = self._pm3('lf em 410x read', VERIFY_TIMEOUT)
+        except Exception as exc:
+            return self._fail('EM4102 verification failed.\nRetry with the tag.',
+                              'readed_down', retry_kind='write_retry')
         found = None
-        if ok2 and out2:
-            for line in out2.splitlines():
+        if not self._pm3_failed(ok, out):
+            for line in (out or '').splitlines():
                 m = re.search(
-                    r'\b(?:EM\s*410x(?:\s+XL)?\s*ID|EM\s+TAG\s+ID)'
-                    r'\s*[:=]?\s*([0-9A-Fa-f]{10})(?![0-9A-Fa-f])',
-                    line, re.I)
+                    r'(?i)^\s*(?:\[\+\]\s*)?EM\s*410x\s+ID\s*[:=]?\s*'
+                    r'([0-9A-F]{10})(?![0-9A-F])\s*$', line)
                 if m:
                     found = m.group(1).upper()
                     break
         if not found:
-            return self._fail(
-                'No tag detected.\nCheck tag position.',
-                'readed_down',
-                retry_action='do_clone_em4102',
-                retry_kind='write_retry'
-            )
-        if found != em_id.upper():
-            return self._fail(
-                self._tr('Tag data mismatch.\nExp: {}\nGot: {}', em_id.upper(), found),
-                'readed_down',
-                retry_action='do_clone_em4102',
-                retry_kind='write_retry'
-            )
+            return self._fail('EM4102 verification failed.\nNo valid ID read.\nRetry.',
+                              'readed_down', retry_kind='write_retry')
+        if found != em_id:
+            return self._fail('Tag data mismatch.\nExp: {}\nGot: {}'.format(em_id, found),
+                              'readed_down', retry_kind='write_retry')
         count = int(self.host.get_var('down_count', '0') or '0') + 1
         self.host.set_var('down_count', str(count))
         return {'status': 'done'}
+
+    def do_clone_em4102(self):
+        # Compatibility entry point; staged UI invokes each step separately.
+        for step in (self.do_prepare_em4102, self.do_quick_search_t5577, self.do_detect_t5577,
+                     self.do_write_em4102, self.do_verify_em4102):
+            result = step()
+            if result.get('status') not in ('ok', 'done'):
+                return result
+        return result
 
     def _set_txt_charset(self):
         mode = 'ABC'
@@ -745,7 +896,13 @@ class PaxtonCloneDownPlugin(object):
 
     def do_error_retry(self):
         retry = self.host.get_var('err_retry', '')
+        if retry in ('do_clone_paxton', 'do_clone_em4102', 'do_write_paxton', 'do_write_em4102'):
+            self.host.set_var('err_retry', '')
+            return {'status': self.host.get_var('err_return', '') or 'menu'}
         retry_kind = self.host.get_var('err_retry_kind', 'normal')
+        if retry_kind == 't55_scan':
+            self.host.set_var('err_retry_kind', 'normal')
+            return {'status': 'em_search'}
 
         if retry_kind == 'readwrite':
             self._clear_read_write_cache()
@@ -837,3 +994,28 @@ class PaxtonCloneDownPlugin(object):
     def do_load_down(self):
         self.host.set_var('flow', 'down')
         return {'status': 'down'}
+
+# UI progress screens: keep each successful stage visible for at least 2 seconds.
+# These methods are executed by run: (worker), never by call: (UI thread).
+# Do not delay errors, user-controlled screens, or the underlying RF operations.
+def _minimum_progress_display(method):
+    @functools.wraps(method)
+    def wrapped(self, *args, **kwargs):
+        started = time.monotonic()
+        result = method(self, *args, **kwargs)
+        if isinstance(result, dict) and result.get('status') in ('ok', 'done', 'candidate'):
+            remaining = 2.0 - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+        return result
+    return wrapped
+
+
+for _stage in (
+    'do_prepare_paxton', 'do_search_pcf7936', 'do_detect_pcf7936',
+    'do_write_paxton', 'do_verify_paxton', 'do_prepare_em4102',
+    'do_quick_search_t5577', 'do_detect_t5577',
+    'do_write_em4102', 'do_verify_em4102',
+):
+    setattr(PaxtonCloneDownPlugin, _stage,
+            _minimum_progress_display(getattr(PaxtonCloneDownPlugin, _stage)))
