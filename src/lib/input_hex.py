@@ -40,8 +40,8 @@ class FreeHexInput(object):
         self._canvas = canvas
         self._label = label
         self._hint = hint
-        self._max_length = int(max_length)
-        self._per_line = int(per_line)
+        self._max_length = max(1, int(max_length))
+        self._per_line = max(1, int(per_line))
         self._x0 = x0
         self._font = resources.get_font(font_size)
         self._hint_font = resources.get_font(hint_font_size)
@@ -101,8 +101,10 @@ class FreeHexInput(object):
         if self._cursor < len(self._digits) - 1:
             self._cursor += 1
         elif len(self._digits) < self._max_length:
-            self._digits.append('0')
-            self._cursor += 1
+            candidate = self._digits + ['0']
+            if self._layout(candidate) is not None:
+                self._digits.append('0')
+                self._cursor += 1
         self._redraw()
 
     def getValue(self):
@@ -112,55 +114,71 @@ class FreeHexInput(object):
     def length(self):
         return len(self._digits)
 
+    # -- pixel-aware layout -------------------------------------------
+
+    def _measure(self, text):
+        """Use Canvas bounding boxes, not font.measure() (firmware fonts may be strings)."""
+        if not text:
+            return 0
+        item = self._canvas.create_text(0, 0, text=text, font=self._font,
+                                        anchor='w', tags='_hex_measure')
+        try:
+            bounds = self._canvas.bbox(item)
+            return max(0, bounds[2] - bounds[0]) if bounds else len(text) * 10
+        finally:
+            self._canvas.delete(item)
+
+    def _layout(self, digits):
+        """Return digit (row, x) positions; None if two lines cannot hold them.
+
+        Keep the second line aligned with the first digit, never with the label.
+        Respect the legacy per_line split as well as real pixel widths.
+        """
+        first_x = self._x0 + self._measure(self._label)
+        right_edge = SCREEN_W - 4
+        positions = []
+        row = 0
+        x = first_x
+        for i, digit in enumerate(digits):
+            width = self._measure(digit)
+            if row == 0 and (i >= self._per_line or x + width > right_edge):
+                row = 1
+                x = first_x
+            if x + width > right_edge:
+                return None
+            positions.append((row, x))
+            x += width
+        return positions
+
     # -- drawing -----------------------------------------------------
 
     def _redraw(self):
         canvas = self._canvas
         canvas.delete(TAG)
-
         row_top_y = self._y_offset
         row_bottom_y = row_top_y + self._line_gap
-
-        digit_x0 = self._x0
         if self._label:
-            item = canvas.create_text(
-                self._x0, row_top_y, text=self._label, fill=LABEL_COLOR,
-                font=self._font, anchor='w', tags=TAG,
-            )
-            bbox = canvas.bbox(item)
-            if bbox:
-                digit_x0 = bbox[2]
+            canvas.create_text(self._x0, row_top_y, text=self._label,
+                               fill=LABEL_COLOR, font=self._font,
+                               anchor='w', tags=TAG)
 
-        x_row = [digit_x0, digit_x0]
+        positions = self._layout(self._digits)
+        if positions is None:
+            # Defensive fallback for labels changed after text was entered.
+            positions = self._layout(self._digits[:1]) or [(0, self._x0)]
 
-        for i, ch in enumerate(self._digits):
-            row = i // self._per_line
-            if row > 1:
-                row = 1
-
+        for i, (row, x) in enumerate(positions):
+            ch = self._digits[i]
             y = row_top_y if row == 0 else row_bottom_y
-            x = x_row[row]
-
-            item = canvas.create_text(
-                x, y, text=ch, fill=self._text_color,
-                font=self._font, anchor='w', tags=TAG,
-            )
-
-            bbox = canvas.bbox(item)
-            if bbox:
-                x0, y0, x1, y1 = bbox
-                if i == self._cursor:
-                    canvas.create_line(
-                        x0, y1 + 2, x1, y1 + 2,
-                        fill=self._text_color, width=2, tags=TAG,
-                    )
-                x_row[row] = x1
-            else:
-                x_row[row] = x + 10
+            item = canvas.create_text(x, y, text=ch, fill=self._text_color,
+                                      font=self._font, anchor='w', tags=TAG)
+            bounds = canvas.bbox(item)
+            if bounds and i == self._cursor:
+                x0, y0, x1, y1 = bounds
+                canvas.create_line(x0, y1 + 2, x1, y1 + 2,
+                                   fill=self._text_color, width=2, tags=TAG)
 
         if self._hint:
-            canvas.create_text(
-                SCREEN_W // 2, CONTENT_Y0 + CONTENT_H - 2,
-                text=self._hint, fill=HINT_COLOR,
-                font=self._hint_font, anchor='s', tags=TAG,
-            )
+            canvas.create_text(SCREEN_W // 2, CONTENT_Y0 + CONTENT_H - 2,
+                               text=self._hint, fill=HINT_COLOR,
+                               font=self._hint_font, anchor='s', tags=TAG)
