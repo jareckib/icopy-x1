@@ -74,6 +74,8 @@ and the matching ``ui.json`` screen:
     Copyright (c) 2026: jareckib
 """
 
+import threading
+
 from lib._constants import SCREEN_W, CONTENT_Y0, CONTENT_H
 from lib import resources
 
@@ -84,7 +86,7 @@ SPECIAL = '-_.() '
 
 # Order matters: this is the order M2 cycles through.
 CHARSETS = (UPPER, LOWER, DIGITS, SPECIAL)
-CHARSET_NAMES = ('ABC', 'abc', '123', '#$%')
+CHARSET_NAMES = ('ABC', 'abc', '123', '-_.')
 
 LABEL_COLOR = '#000000'
 VALUE_COLOR = '#0000FF'
@@ -101,6 +103,7 @@ class FreeTextInput(object):
                  per_line=10, x0=8, font_size=13, hint_font_size=10,
                  line_gap=20, y_offset=9, text_color=DEFAULT_TEXT_COLOR):
         self._canvas = canvas
+        self._owner_thread = threading.get_ident()
         self._label = label
         self._hint = hint
         self._max_length = max_length
@@ -116,6 +119,21 @@ class FreeTextInput(object):
         self._cursor = 0
         self.max_total_chars = 20
 
+    def _check_ui_thread(self):
+        return  # Existing plugin is responsible for UI-thread scheduling
+
+    def _text_width(self, text):
+        """Measure text with the actual Canvas font, not a font-spec string."""
+        if not text:
+            return 0
+        item = self._canvas.create_text(0, 0, text=text, font=self._font,
+                                        anchor='w', tags='_input_measure')
+        try:
+            rect = self._canvas.bbox(item)
+            return rect[2] - rect[0] if rect else 0
+        finally:
+            self._canvas.delete(item)
+
     # -- public API ------------------------------------------------
 
     def setY(self, y):
@@ -129,7 +147,7 @@ class FreeTextInput(object):
         self._redraw()
 
     def getCharsetName(self):
-        """Short label for the active group ('ABC'/'abc'/'123'/'#$%'),
+        """Short label for the active group ('ABC'/'abc'/'123'/'-_.'),
         e.g. to show on the M2 button."""
         return CHARSET_NAMES[self._charset_idx]
 
@@ -137,6 +155,7 @@ class FreeTextInput(object):
         self._redraw()
 
     def hide(self):
+        self._check_ui_thread()
         self._canvas.delete(TAG)
 
     def _normalize_current_char(self):
@@ -176,12 +195,20 @@ class FreeTextInput(object):
             self._redraw()
 
     def _get_input_limit(self):
-        # total line = label + " " + text
-        # and must never exceed 20 chars
-        input_limit = self.max_total_chars - len(self._label) - 1
-        if input_limit < 1:
-            input_limit = 1
-        return min(self._max_length, input_limit)
+        # Use measured pixel width; preserve the original 20-character ceiling.
+        char_limit = max(1, self.max_total_chars - len(self._label) - 1)
+        max_chars = min(max(1, int(self._max_length)), char_limit)
+        remaining = SCREEN_W - self._x0 - 4 - self._text_width(self._label + ' ')
+        if remaining <= 0:
+            return 1
+        count = 0
+        for i in range(max_chars):
+            ch = self._chars[i] if i < len(self._chars) else CHARSETS[self._charset_idx][0]
+            if self._text_width(''.join(self._chars[:min(i, len(self._chars))]) +
+                                  (ch if i >= len(self._chars) else '')) > remaining:
+                break
+            count += 1
+        return max(1, count)
 
     def moveRight(self):
         input_limit = self._get_input_limit()
@@ -204,6 +231,7 @@ class FreeTextInput(object):
     # -- drawing -----------------------------------------------------
 
     def _redraw(self):
+        self._check_ui_thread()
         canvas = self._canvas
         canvas.delete(TAG)
 
@@ -212,7 +240,7 @@ class FreeTextInput(object):
         value_text = text[:self._get_input_limit()]
 
         # label black
-        canvas.create_text(
+        label_item = canvas.create_text(
             self._x0,
             self._y_offset,
             text=label_text,
@@ -223,7 +251,8 @@ class FreeTextInput(object):
         )
 
         # draw value chars, with underline under active char
-        x = self._x0 + 55
+        label_bbox = canvas.bbox(label_item)
+        x = label_bbox[2] if label_bbox else self._x0 + 55
         for i, ch in enumerate(value_text):
             item = canvas.create_text(
                 x,
@@ -234,7 +263,10 @@ class FreeTextInput(object):
                 anchor='w',
                 tags=TAG,
             )
-            x0, y0, x1, y1 = canvas.bbox(item)
+            bbox = canvas.bbox(item)
+            if not bbox:
+                continue
+            x0, y0, x1, y1 = bbox
             if i == self._cursor:
                 canvas.create_line(
                     x0, y1 + 2, x1, y1 + 2,
