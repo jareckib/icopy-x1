@@ -12,6 +12,12 @@
                     "type": "text",
                     "lines": [
                         {
+                            "text": ""
+                        },
+                        {
+                            "text": ""
+                        },
+                        {
                             "text": "Initializing...",
                             "size": "medium",
                             "align": "center"
@@ -46,9 +52,9 @@
                     "DOWN": "call:dec_roll_down",
                     "LEFT": "call:dec_move_left",
                     "RIGHT": "call:dec_move_right",
-                    "OK": "run:do_capture_dec",
-                    "M2": "run:do_capture_dec",
-                    "M1": "run:dec_back_cleanse"
+                    "OK": "call:do_capture_dec",
+                    "M2": "call:do_capture_dec",
+                    "M1": "call:dec_back_cleanse"
                 }
             },
             "transitions": {
@@ -108,6 +114,9 @@
                 "content": {
                     "type": "text",
                     "lines": [
+                        {
+                            "text": ""
+                        },
                         {
                             "text": ""
                         },
