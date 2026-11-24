@@ -14,7 +14,8 @@
 """Single-line filename-safe text input for iCopy-X / iCopy-XS.
 
 Features:
-- Enter uppercase A-Z, lowercase a-z, digits 0-9 and -_.() or space.
+- Default mode: filename-safe A-Z, a-z, digits and -_.() or space.
+- password=True enables additional ASCII punctuation in the SPECIAL group only.
 - Exclude characters forbidden in Windows filenames and control characters.
 - UP/DOWN edits the current character within the selected group.
 - M2 / nextCharset() cycles the existing four character groups:
@@ -42,10 +43,14 @@ UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 LOWER = 'abcdefghijklmnopqrstuvwxyz'
 DIGITS = '0123456789'
 SPECIAL = '-_.() '
+# Printable ASCII punctuation for passwords; filename input stays unchanged.
+PASSWORD_SPECIAL = SPECIAL + ''.join(c for c in '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~' if c not in SPECIAL)
 
 # Order matters: this is the order M2 cycles through.
 CHARSETS = (UPPER, LOWER, DIGITS, SPECIAL)
 CHARSET_NAMES = ('ABC', 'abc', '123', '-_.')
+PASSWORD_CHARSETS = (UPPER, LOWER, DIGITS, PASSWORD_SPECIAL)
+PASSWORD_CHARSET_NAMES = ('ABC', 'abc', '123', 'sym')
 
 LABEL_COLOR = '#000000'
 VALUE_COLOR = '#0000FF'
@@ -60,7 +65,8 @@ class FreeTextInput(object):
 
     def __init__(self, canvas, label='', hint='', max_length=None,
                  per_line=10, x0=8, font_size=13, hint_font_size=10,
-                 line_gap=20, y_offset=9, text_color=DEFAULT_TEXT_COLOR):
+                 line_gap=20, y_offset=9, text_color=DEFAULT_TEXT_COLOR,
+                 password=False):
         self._canvas = canvas
         self._owner_thread = threading.get_ident()
         self._label = label
@@ -73,8 +79,12 @@ class FreeTextInput(object):
         self._line_gap = line_gap
         self._y_offset = y_offset
         self._text_color = text_color
+        self._password = bool(password)
+        self._charsets = PASSWORD_CHARSETS if self._password else CHARSETS
+        self._charset_names = (PASSWORD_CHARSET_NAMES if self._password
+                               else CHARSET_NAMES)
         self._charset_idx = 0  # start on UPPER
-        self._chars = [CHARSETS[self._charset_idx][0]]  # 'A'
+        self._chars = [self._charsets[self._charset_idx][0]]  # 'A'
         self._cursor = 0
 
     def _check_ui_thread(self):
@@ -107,7 +117,7 @@ class FreeTextInput(object):
     def getCharsetName(self):
         """Short label for the active group ('ABC'/'abc'/'123'/'-_.'),
         e.g. to show on the M2 button."""
-        return CHARSET_NAMES[self._charset_idx]
+        return self._charset_names[self._charset_idx]
 
     def show(self):
         self._redraw()
@@ -118,7 +128,7 @@ class FreeTextInput(object):
 
     def _normalize_current_char(self):
         """Ensure current cursor char belongs to active charset."""
-        charset = CHARSETS[self._charset_idx]
+        charset = self._charsets[self._charset_idx]
         ch = self._chars[self._cursor]
         if ch not in charset:
             proposed = self._chars[:]
@@ -127,7 +137,7 @@ class FreeTextInput(object):
                 self._chars[self._cursor] = charset[0]
 
     def rollUp(self):
-        charset = CHARSETS[self._charset_idx]
+        charset = self._charsets[self._charset_idx]
         current = self._chars[self._cursor]
         idx = charset.index(current) if current in charset else -1
         candidate = charset[(idx + 1) % len(charset)]
@@ -138,7 +148,7 @@ class FreeTextInput(object):
         self._redraw()
 
     def rollDown(self):
-        charset = CHARSETS[self._charset_idx]
+        charset = self._charsets[self._charset_idx]
         current = self._chars[self._cursor]
         idx = charset.index(current) if current in charset else 0
         candidate = charset[(idx - 1) % len(charset)]
@@ -152,8 +162,8 @@ class FreeTextInput(object):
         """Switch to the next character group (UPPER->lower->digits->
         special->UPPER...) and reset the character under the cursor
         to that group's first entry if needed."""
-        self._charset_idx = (self._charset_idx + 1) % len(CHARSETS)
-        charset = CHARSETS[self._charset_idx]
+        self._charset_idx = (self._charset_idx + 1) % len(self._charsets)
+        charset = self._charsets[self._charset_idx]
         if self._chars[self._cursor] not in charset:
             proposed = self._chars[:]
             proposed[self._cursor] = charset[0]
@@ -181,8 +191,8 @@ class FreeTextInput(object):
         if self._cursor < len(self._chars) - 1:
             self._cursor += 1
         elif ((input_limit is None or len(self._chars) < input_limit) and
-              self._fits_text(''.join(self._chars) + CHARSETS[self._charset_idx][0])):
-            self._chars.append(CHARSETS[self._charset_idx][0])
+              self._fits_text(''.join(self._chars) + self._charsets[self._charset_idx][0])):
+            self._chars.append(self._charsets[self._charset_idx][0])
             self._cursor += 1
         self._redraw()
 
