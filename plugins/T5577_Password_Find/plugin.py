@@ -708,36 +708,54 @@ class T5577PasswordFindPlugin:
                 unregister(on_output)
 
     def _cleanup_search_batches(self):
-        """Remove only the temporary scan batch and its PM3 SPIFFS dictionary.
+        """Remove temporary scan files and verify every removal.
 
-        Called from run:do_search after terminal search results, never in a
-        call: UI handler. Do not send a command to a blocked/closed reader.
+        Never issue a PM3 command while its reader pipeline is unavailable.
+        The search result is preserved in memory even on cleanup failure.
         """
-        try:
-            if self._batch_uploaded and not self._reader_blocked and not self._closed:
+        failures=[]
+        if self._batch_uploaded:
+            if self._reader_blocked or self._closed:
+                failures.append('PM3 unavailable')
+            else:
                 try:
-                    self._executor_command('mem spiffs remove -f dict_t55xx.bin',
-                                           12000, 'cleanup')
+                    ret,out=self._executor_command(
+                        'mem spiffs remove -f dict_t55xx.bin',12000,'cleanup')
+                    clean=re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',str(out or ''))
+                    # The Iceman client prints this only after an ACK with
+                    # PM3_SUCCESS from SPIFFS_REMOVE.
+                    removed=bool(re.search(
+                        r"\\bRemoved\\s+[`'\\\"]?dict_t55xx\\.bin[`'\\\"]?",
+                        clean,re.I))
+                    if ret == -1 or not removed or re.search(
+                            r'failed to remove|timeout while waiting',clean,re.I):
+                        failures.append('PM3 dictionary not removed')
+                    else:
+                        self._batch_uploaded=False
                 except Exception:
-                    pass  # Cleanup must not hide the search result.
-        finally:
-            self._batch_uploaded=False
-            for path in (CHK_BATCH, CHK_BATCH + '.new'):
-                try:
-                    if os.path.isfile(path):
-                        os.remove(path)
-                except OSError:
-                    pass
+                    failures.append('PM3 dictionary removal failed')
+        for path in (CHK_BATCH,CHK_BATCH + '.new'):
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                if os.path.exists(path):
+                    failures.append('Batch file remains')
+            except OSError:
+                failures.append('Batch file removal failed')
+        return failures
 
     def do_search(self):
-        """Run one batch and clean temporary files on every terminal result."""
+        """Run one batch and report cleanup verification on terminal results."""
         try:
             result=self._do_search_batch()
         except Exception:
             self._cleanup_search_batches()
             raise
         if isinstance(result,dict) and result.get('status')!='more':
-            self._cleanup_search_batches()
+            failures=self._cleanup_search_batches()
+            if failures:
+                self._cleanup_error='; '.join(failures)
+                return self.error('Cleanup failed: '+self._cleanup_error)
         return result
 
     def _chk_batch(self):
