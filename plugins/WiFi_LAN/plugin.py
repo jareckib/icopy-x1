@@ -992,4 +992,3 @@ class WiFiRemoteAccessPlugin(object):
             return {'status': 'disconnected'}
         except Exception as exc:
             return self._error('Disconnect failed: %s' % str(exc)[:70])
-
