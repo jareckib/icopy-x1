@@ -638,3 +638,163 @@ class WiFiRemoteAccessPlugin(object):
                         continue
                     base = os.path.join(directory, name)
                     if os.path.exists(os.path.join(base, 'wireless')) or os.path.exists(os.path.join(base, 'phy80211')):
+                        names.append(name)
+            except OSError:
+                pass
+        return names
+
+    @staticmethod
+    def _parse_iwlist(output):
+        found = []
+        for match in re.finditer(r'ESSID:"((?:\\.|[^"\\])*)"', output):
+            ssid = match.group(1).replace('\\"', '"').replace('\\\\', '\\')
+            if ssid and ssid not in found:
+                found.append(ssid)
+        return found
+
+    @staticmethod
+    def _parse_iw_scan(output):
+        names = []
+        for line in output.splitlines():
+            match = re.match(r'\s*SSID: (.*)$', line)
+            if match and match.group(1) and match.group(1) not in names:
+                names.append(match.group(1))
+        return names
+
+    def scan(self):
+        interfaces = self._wireless_interfaces()
+        if not interfaces:
+            return self._error('No Wi-Fi interface. Check USB adapter and driver.')
+        try:
+            nets = []
+            for iface in interfaces[:2]:
+                self._safe_run(['ip', 'link', 'set', iface, 'up'], timeout=8)
+                rc, out, err = self._safe_run(['iw', 'dev', iface, 'scan'], timeout=24)
+                current = self._parse_iw_scan(out) if rc == 0 else []
+                if not current:
+                    rc, out, err = self._safe_run(['iwlist', iface, 'scanning'], timeout=24)
+                    if rc == 0:
+                        current = self._parse_iwlist(out)
+                for name in current:
+                    if '\n' not in name and '\r' not in name and len(name.encode('utf-8')) <= 32 and name not in nets:
+                        nets.append(name)
+            self._networks = nets
+            self._network_index = 0
+            for n in range(8):
+                name = self._networks[n] if n < len(self._networks) else '(none)'
+                self._var('ap%d' % n, '%d. %s' % (n + 1, name))
+            self._var('network_note', '%d networks found' % len(nets))
+            return {'status': 'found'}
+        except Exception as exc:
+            return self._error('Scan failed: %s' % str(exc)[:70])
+
+    def _error(self, message):
+        message = str(message)[:120]
+        self._last_error = self._translate_display(message)
+        self._var('error_msg', self._last_error)
+        return {'status': 'error', 'error_msg': message}
+
+    def _choose(self, index):
+        if index >= len(self._networks):
+            self._toast('Network not found')
+            return
+        self._ssid = self._networks[index]
+        self._password_parts = []
+        return {'choice': 'password'}
+
+    def choose_ap0(self): self._choose(0)
+    def choose_ap1(self): self._choose(1)
+    def choose_ap2(self): self._choose(2)
+    def choose_ap3(self): self._choose(3)
+    def choose_ap4(self): self._choose(4)
+    def choose_ap5(self): self._choose(5)
+    def choose_ap6(self): self._choose(6)
+    def choose_ap7(self): self._choose(7)
+
+    @staticmethod
+    def _wpa_quote(s):
+        if not isinstance(s, str) or '\n' in s or '\r' in s or '\x00' in s:
+            raise ValueError('Invalid WPA text')
+        return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+    def _read_credentials(self):
+        result = {}
+        if not os.path.isfile(CONFIG):
+            raise ValueError('No saved Wi-Fi. Scan or enter SSID first')
+        with open(CONFIG, 'r', encoding='utf-8') as f:
+            for line in f:
+                if '=' in line:
+                    key, val = line.rstrip('\r\n').split('=', 1)
+                    result[key] = val
+        ssid, password = result.get('ssid', ''), result.get('psk', '')
+        if not ssid or len(ssid.encode('utf-8')) > 32:
+            raise ValueError('Invalid saved SSID')
+        if len(password) < 8 or len(password) > 63 or not all(ord(c) < 128 for c in password):
+            raise ValueError('Invalid saved password')
+        if any(ord(c) < 32 or ord(c) > 126 for c in password):
+            raise ValueError('Invalid saved password')
+        return ssid, password
+
+    @staticmethod
+    def _ip_address(iface):
+        try:
+            result = subprocess.run(['ip', '-4', '-o', 'addr', 'show', 'dev', iface],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True, timeout=6)
+            match = re.search(r'\binet\s+(\d{1,3}(?:\.\d{1,3}){3})/\d+', result.stdout)
+            return match.group(1) if match else ''
+        except (OSError, subprocess.TimeoutExpired):
+            return ''
+
+    def _read_own_pid(self):
+        try:
+            with open(os.path.join(RUNTIME, 'wpa.pid'), 'r') as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return 0
+
+    def _stop_own_wpa(self):
+        pid = self._read_own_pid()
+        if pid > 1:
+            try:
+                with open('/proc/%d/cmdline' % pid, 'rb') as f:
+                    cmdline = f.read().replace(b'\x00', b' ')
+                if b'wpa_supplicant' in cmdline and RUNTIME.encode('utf-8') in cmdline:
+                    os.kill(pid, signal.SIGTERM)
+            except (OSError, IOError):
+                pass
+        try:
+            os.unlink(os.path.join(RUNTIME, 'wpa.pid'))
+        except OSError:
+            pass
+
+    def _dhcp(self, iface):
+        if shutil.which('dhclient'):
+            return self._safe_run(['dhclient', '-1', '-v', '-pf', os.path.join(RUNTIME, 'dhclient.pid'), iface], timeout=40)[0] == 0
+        if shutil.which('udhcpc'):
+            return self._safe_run(['udhcpc', '-i', iface, '-n', '-q', '-t', '5', '-T', '3'], timeout=35)[0] == 0
+        if shutil.which('dhcpcd'):
+            return self._safe_run(['dhcpcd', '-w', '-t', '30', iface], timeout=36)[0] == 0
+        raise RuntimeError('No DHCP client available')
+
+    def _wpa_cli_status(self, iface):
+        if not shutil.which('wpa_cli'):
+            return ''
+        rc, out, err = self._safe_run(['wpa_cli', '-i', iface, 'status'], timeout=5)
+        if rc == 0 and ('wpa_state=' in out or 'address=' in out):
+            return out
+        return ''
+
+    def _wpa_cli_command(self, iface, *args):
+        rc, out, err = self._safe_run(['wpa_cli', '-i', iface] + list(args), timeout=9)
+        if rc != 0 or 'FAIL' in out.splitlines():
+            raise RuntimeError('wpa_cli %s failed' % (args[0] if args else ''))
+        return out.strip()
+
+    def _configure_existing_wpa(self, iface, ssid, password):
+        # Reuse the current supplicant rather than starting a second daemon.
+        # Never modify persistent wpa_supplicant configuration.
+        net_id = self._wpa_cli_command(iface, 'add_network').splitlines()[-1].strip()
+        if not net_id.isdigit():
+            raise RuntimeError('Cannot create network in WPA')
+        try:
