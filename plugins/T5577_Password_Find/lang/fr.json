@@ -133,5 +133,6 @@
   "Max est: calculating": "Max : calcul...",
   "Upper: calculating": "Max : calcul...",
   "Ready to search": "Prêt à rechercher",
-  "ARM flash dictionary": "Dico flash ARM"
+  "ARM flash dictionary": "Dico flash ARM",
+  "Cleanup failed": "Échec du nettoyage"
 }
