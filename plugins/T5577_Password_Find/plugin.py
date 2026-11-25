@@ -82,7 +82,7 @@ class T5577PasswordFindPlugin:
         self._prepared_keys=None;self._prepared_total=None
         self._action_index=0;self._pending_action=None;self._verified_block=None;self._old_password=None
         self._chip_type='';self._lf_id='';self._search_note='';self._p1_verified=False
-        self._pm3_serial=0;self._pending_batch=None;self._batch_size=CHK_BATCH_INITIAL;self._batch_index=0;self._last_batch_s=None;self._scan_started_mono=None;self._scan_started_wall=None;self._batch_timings=[];self._eta_line=self.tr('ETA: calculating');self._upper_line=self.tr('Upper: calculating');self._firmware_notice='';self._batch_uploaded=False
+        self._pm3_serial=0;self._pending_batch=None;self._batch_size=CHK_BATCH_INITIAL;self._batch_index=0;self._last_batch_s=None;self._scan_started_mono=None;self._scan_started_wall=None;self._batch_timings=[];self._eta_line=self.tr('ETA: calculating');self._upper_line=self.tr('Upper: calculating');self._firmware_notice='';self._batch_uploaded=False;self._cleanup_error='';self._cleanup_result=None
 
     def var(self,k,v):self.host.set_var(k,str(v))
     def tr(self,v):
@@ -177,6 +177,7 @@ class T5577PasswordFindPlugin:
         'set_confirm':[self.tr('New: ')+str(self.password or ''),'',self.tr('Protect this tag?')],
         'set_success':[self.tr('Password enabled'),str(self.password or '')],
         'error':[getattr(self,'_error_full',self.tr('Unknown error'))],
+        'cleanup_error':[self.tr('Cleanup failed')],
         'firmware_notice':[self._firmware_notice or self.tr('Firmware incompatible'), self.tr('Update PM3 firmware'), self.tr('Plugin unavailable')],
         'save_prompt':[self.tr('Password candidate:'),str(self.found or ''),'',self.tr('Save to dictionary?')],
         'saved':[self.tr('Password saved'),self.tr('Dictionary updated')],
@@ -186,7 +187,7 @@ class T5577PasswordFindPlugin:
         'action_failure':[self.tr('Operation not verified'),self.tr('Check tag state')],
         'date_summary':[self.tr('Dates generated in RAM')],
         }
-        self._draw_lines(info.get(name,[]),'#C62828' if name in ('error','unknown','already_locked','action_failure','confirm_locked','scan_warning','p1_failed','firmware_notice','absent','search_failed','detect_failed') else '#555555',fixed_size=12 if name=='error' and getattr(self,'_cleanup_error',None) and getattr(self,'_error_full','')==self.tr('Cleanup failed') else None)
+        self._draw_lines(info.get(name,[]),'#C62828' if name in ('cleanup_error','error','unknown','already_locked','action_failure','confirm_locked','scan_warning','p1_failed','firmware_notice','absent','search_failed','detect_failed') else '#555555',fixed_size=12 if name=='cleanup_error' else None)
     def set_screen(self,name):self._screen_name=name;self._info_page=0;self.show_info()
     def draw_action_menu(self):
         names=(self.tr('Remove Password'),self.tr('Change Password'),self.tr('Wipe'),self.tr('Back'))
@@ -754,7 +755,21 @@ class T5577PasswordFindPlugin:
             failures=self._cleanup_search_batches()
             if failures:
                 self._cleanup_error='; '.join(failures)
-                return self.error(self.tr('Cleanup failed'))
+                self._cleanup_result=dict(result)
+                return {'status':'cleanup_error'}
+            self._cleanup_error=''
+            self._cleanup_result=None
+        return result
+
+    def retry_cleanup(self):
+        """Retry only leftover temporary-file deletion, never RFID scanning."""
+        failures=self._cleanup_search_batches()
+        if failures:
+            self._cleanup_error='; '.join(failures)
+            return {'status':'cleanup_error'}
+        self._cleanup_error=''
+        result=self._cleanup_result or {'status':'none'}
+        self._cleanup_result=None
         return result
 
     def _chk_batch(self):
@@ -1149,6 +1164,7 @@ class T5577PasswordFindPlugin:
     def screen_set_success(self):self.set_screen('set_success')
 
     def screen_error(self):self.set_screen('error')
+    def screen_cleanup_error(self):self.set_screen('cleanup_error')
 
     def screen_action_confirm(self):self.set_screen("action_confirm")
     def screen_action_success(self):self.set_screen("action_success")
