@@ -478,3 +478,163 @@ class WiFiRemoteAccessPlugin(object):
 
     def networks_select(self):
         selected = self._network_index
+        self.clear_networks()
+        if selected < len(self._networks):
+            self._choose(selected)
+            return {'choice': 'password'}
+        if selected == len(self._networks):
+            self._password_parts = []
+            return {'choice': 'manual'}
+        return {'choice': 'rescan'}
+
+    def on_load(self):
+        self._var('summary', 'Scan or use saved Wi-Fi.')
+        self._var('network_note', 'Choose a network.')
+        for index in range(8):
+            self._var('ap%d' % index, '%d. (none)' % (index + 1))
+        self._var('connection_info', 'Not connected')
+        self._var('error_msg', '')
+        self._var('ssh_text', 'SSH: checking on status')
+        self._var('ssid_label', 'SSID:')
+
+    def on_destroy(self):
+        # Preserve Wi-Fi for ongoing SSH/SFTP connections.
+        self._password_parts = []
+
+    def _var(self, key, value):
+        if self.host is not None and hasattr(self.host, 'set_var'):
+            self.host.set_var(key, self._translate_display(value))
+
+    def _toast(self, message):
+        if self.host is not None and hasattr(self.host, 'show_toast'):
+            self.host.show_toast(self._translate_display(message), timeout=2600)
+
+    def _create_input(self, label, max_length):
+        if not self.host or not hasattr(self.host, 'getCanvas'):
+            raise RuntimeError('PluginActivity with canvas required')
+        canvas = self.host.getCanvas()
+        if canvas is None:
+            raise RuntimeError('Canvas unavailable')
+        # SSIDs are network identifiers, not filenames; retain punctuation support.
+        widget = SSID32Input(canvas, label=label, max_length=max_length,
+                             x0=8, y_offset=107, font_size=12,
+                             translate=self.tr)
+        self.host._input_widget = widget
+        widget.show()
+        if hasattr(self.host, 'setRightButton'):
+            self.host.setRightButton(widget.getCharsetName())
+
+    # UI-thread setup; no I/O here.
+    def input_ssid(self):
+        self._create_input('SSID:', 32)
+
+    def input_password(self):
+        if not self.host or not hasattr(self.host, 'getCanvas'):
+            raise RuntimeError('PluginActivity with canvas required')
+        canvas = self.host.getCanvas()
+        if canvas is None:
+            raise RuntimeError('Canvas unavailable')
+        widget = Password63Input(canvas, label='Pwd:', x0=8, y_offset=79,
+                                 font_size=12, translate=self.tr)
+        self.host._input_widget = widget
+        widget.show()
+        if hasattr(self.host, 'setRightButton'):
+            self.host.setRightButton(widget.getCharsetName())
+
+    def begin_manual(self):
+        self._password_parts = []
+        return {'choice': 'manual'}
+
+    def accept_ssid(self):
+        value = self.host.get_input()
+        if not value or not value.strip():
+            self._toast('SSID cannot be empty')
+            return
+        if len(value.encode('utf-8')) > 32 or '\n' in value or '\r' in value:
+            self._toast('SSID too long/invalid')
+            return
+        self._ssid = value
+        self._password_parts = []
+        return {'status': 'password'}
+
+    def finish_password(self):
+        """OK always confirms the entire 1- or 2-row password."""
+        value = self.host.get_input()
+        if not value or len(value) > 63:
+            self._toast('Password: 8-63 chars')
+            return
+        if len(value) < 8:
+            # OK finishes editing even for 6 characters; WPA2 rejects it.
+            self._last_error = 'WPA2 requires 8-63 chars. Enter a longer password.'
+            self._var('error_msg', self._last_error)
+            return {'status': 'error'}
+        self._password_parts = [value]
+        return {'status': 'save'}
+
+    def restart_password(self):
+        """Reset password editor when the SRW action is available."""
+        self._password_parts = []
+        old = getattr(self.host, '_input_widget', None)
+        if old is not None:
+            old.hide()
+        self.input_password()
+
+    def discard_password(self):
+        self._password_parts = []
+        return {'status': 'menu'}
+
+    def save_credentials(self):
+        password = ''.join(self._password_parts)
+        if not 8 <= len(password) <= 63:
+            return self._error('Password must have 8-63 characters')
+        if any(ord(c) < 32 or ord(c) > 126 for c in password):
+            return self._error('ASCII password required')
+        if (not self._ssid or len(self._ssid.encode('utf-8')) > 32 or
+                any(ch in self._ssid for ch in ('\n', '\r', '\x00'))):
+            return self._error('Invalid SSID')
+        # Persist with restrictive mode, atomically. No password in logs or UI variables.
+        try:
+            return self._save_credentials_impl(password)
+        except (OSError, ValueError) as exc:
+            self._password_parts = []
+            return self._error('Save failed: %s' % str(exc)[:65])
+
+    def _save_credentials_impl(self, password):
+        folder = os.path.dirname(CONFIG)
+        os.makedirs(folder, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix='.wifi-', dir=folder)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, 'w') as handle:
+                handle.write('ssid=%s\npsk=%s\ncountry=GB\n' % (self._ssid, password))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.rename(temp_path, CONFIG)
+            os.chmod(CONFIG, 0o600)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            self._password_parts = []
+            password = None
+        return {'status': 'saved'}
+
+    def _safe_run(self, argv, timeout=8):
+        """Run system command with timeout; no persistent diagnostics."""
+        try:
+            result = subprocess.run(argv, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    universal_newlines=True, timeout=timeout)
+            return result.returncode, result.stdout, result.stderr
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return 127, '', str(exc)
+
+    def _wireless_interfaces(self):
+        paths = ('/sys/class/net',)
+        names = []
+        for directory in paths:
+            try:
+                for name in sorted(os.listdir(directory)):
+                    if not re.match(r'^[a-zA-Z0-9_.-]+$', name):
+                        continue
+                    base = os.path.join(directory, name)
+                    if os.path.exists(os.path.join(base, 'wireless')) or os.path.exists(os.path.join(base, 'phy80211')):
