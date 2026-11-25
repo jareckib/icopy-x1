@@ -125,5 +125,6 @@
   "Date count missing": "Date count missing",
   "Invalid new password": "Invalid new password",
   "Unknown operation": "Unknown operation",
-  "Cleanup failed": "Cleanup failed"
+  "Cleanup failed": "Cleanup failed",
+  "Cleaning up...": "Cleaning up..."
 }
