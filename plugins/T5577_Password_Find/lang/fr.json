@@ -134,5 +134,6 @@
   "Upper: calculating": "Max : calcul...",
   "Ready to search": "Prêt à rechercher",
   "ARM flash dictionary": "Dico flash ARM",
-  "Cleanup failed": "Échec du nettoyage"
+  "Cleanup failed": "Échec du nettoyage",
+  "Cleaning up...": "Nettoyage..."
 }
