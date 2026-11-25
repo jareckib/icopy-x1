@@ -958,3 +958,38 @@ class WiFiRemoteAccessPlugin(object):
                     with open(os.path.join(RUNTIME, 'network_id'), 'r') as handle:
                         network_id = handle.read().strip()
                 except OSError:
+                    pass
+                if network_id.isdigit():
+                    self._safe_run(['wpa_cli', '-i', iface, 'disable_network', network_id], timeout=8)
+                    self._safe_run(['wpa_cli', '-i', iface, 'remove_network', network_id], timeout=8)
+                self._safe_run(['wpa_cli', '-i', iface, 'disconnect'], timeout=8)
+
+            # Release an address acquired by this plugin's dhclient, if any.
+            pidfile = os.path.join(RUNTIME, 'dhclient.pid')
+            if os.path.isfile(pidfile) and shutil.which('dhclient'):
+                self._safe_run(['dhclient', '-r', '-pf', pidfile, iface], timeout=12)
+
+            # Drop address + interface even if a system-owned WPA daemon remains.
+            # Do not stop the SSH service itself (it can remain available on LAN).
+            if not shutil.which('ip'):
+                return self._error('Cannot disconnect: ip tool missing')
+            rc_flush, _, err_flush = self._safe_run(['ip', '-4', 'addr', 'flush', 'dev', iface], timeout=8)
+            rc_down, _, err_down = self._safe_run(['ip', 'link', 'set', 'dev', iface, 'down'], timeout=8)
+            if rc_flush != 0 or rc_down != 0:
+                return self._error('Wi-Fi disconnect failed (IP/link)')
+            self._stop_own_wpa()
+            for filename in ('iface', 'network_id', 'dhclient.pid'):
+                try:
+                    os.unlink(os.path.join(RUNTIME, filename))
+                except OSError:
+                    pass
+            # Avoid showing a false success when an external manager reconnects.
+            if self._ip_address(iface):
+                return self._error('Wi-Fi IP still active; check network manager')
+            self._var('connection_info', 'Not connected')
+            self._var('summary', 'Wi-Fi disconnected')
+            self._var('ssh_text', 'SSH: system managed')
+            return {'status': 'disconnected'}
+        except Exception as exc:
+            return self._error('Disconnect failed: %s' % str(exc)[:70])
+
