@@ -89,5 +89,6 @@
   "Password: 8-63 chars": "Mdp : 8 à 63 car.",
   "Password must have 8-63 characters": "Mdp : 8 à 63 car.",
   "%d networks found": "%d réseaux trouvés",
-  "WPA start failed": "Échec du démarrage WPA"
+  "WPA start failed": "Échec du démarrage WPA",
+  "Disconnecting....": "Déconnexion...."
 }
