@@ -1,0 +1,308 @@
+{
+  "plugin": true,
+  "name": "Wi-Fi LAN",
+  "version": "0.2.33",
+  "initial_state": "menu",
+  "states": {
+    "menu": {
+      "screen": {
+        "title": "Wi-Fi LAN",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Select"
+        },
+        "keys": {
+          "UP": "call:menu_up",
+          "DOWN": "call:menu_down",
+          "OK": "call:menu_select",
+          "M1": "finish",
+          "M2": "call:menu_select"
+        }
+      },
+      "transitions": {
+        "on_result.choice==scan": "scanning",
+        "on_result.choice==saved": "connecting",
+        "on_result.choice==manual": "ssid",
+        "on_result.choice==info": "loading_status",
+        "on_result.choice==disconnect": "disconnecting",
+        "on_error": "error"
+      },
+      "on_enter": "call:draw_menu",
+      "on_exit": "call:clear_menu"
+    },
+    "networks": {
+      "screen": {
+        "title": "Wi-Fi Scan",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Select"
+        },
+        "keys": {
+          "UP": "call:networks_up",
+          "DOWN": "call:networks_down",
+          "OK": "call:networks_select",
+          "M1": "set_state:menu",
+          "M2": "call:networks_select"
+        }
+      },
+      "transitions": {
+        "on_result.choice==password": "password",
+        "on_result.choice==manual": "ssid",
+        "on_result.choice==rescan": "scanning",
+        "on_error": "error"
+      },
+      "on_enter": "call:draw_networks",
+      "on_exit": "call:clear_networks"
+    },
+    "ssid": {
+      "screen": {
+        "title": "Network SSID",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 55
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "ABC"
+        },
+        "keys": {
+          "OK": "call:accept_ssid",
+          "M1": "set_state:menu",
+          "M2": "input:charset"
+        }
+      },
+      "on_enter": "call:input_ssid",
+      "transitions": {
+        "on_result.status==password": "password",
+        "on_error": "error"
+      }
+    },
+    "password": {
+      "screen": {
+        "title": "Wi-Fi Password",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 50
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "ABC"
+        },
+        "keys": {
+          "OK": "call:finish_password",
+          "M1": "call:discard_password",
+          "M2": "input:charset",
+          "ALL": "call:restart_password"
+        }
+      },
+      "on_enter": "call:input_password",
+      "transitions": {
+        "on_result.status==save": "saving",
+        "on_result.status==error": "error",
+        "on_result.status==menu": "menu",
+        "on_error": "error"
+      }
+    },
+    "connecting": {
+      "screen": {
+        "title": "Connecting...",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Connecting to Wi-Fi...",
+              "size": "large"
+            },
+            {
+              "text": "Getting IP via DHCP.",
+              "size": "large"
+            },
+            {
+              "text": "Do not power off.",
+              "size": "large"
+            }
+          ],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": " "
+        },
+        "keys": {
+          "M1": "set_state:menu"
+        }
+      },
+      "on_enter": "run:do_connect",
+      "transitions": {
+        "on_result.status==connected": "status",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "status": {
+      "screen": {
+        "title": "Wi-Fi LAN Status",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "OK": "run:do_status",
+          "M1": "set_state:menu",
+          "M2": "run:do_status"
+        }
+      },
+      "transitions": {
+        "on_result.status==status": "status",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_enter": "call:draw_status_screen"
+    },
+    "error": {
+      "screen": {
+        "title": "Wi-Fi Error",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Menu"
+        },
+        "keys": {
+          "OK": "set_state:menu",
+          "M1": "set_state:menu",
+          "M2": "set_state:menu"
+        }
+      },
+      "on_enter": "call:draw_error",
+      "on_exit": "call:clear_error"
+    },
+    "scanning": {
+      "screen": {
+        "title": "Wi-Fi Scan",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Scanning networks...",
+              "size": "large",
+              "align": "center"
+            }
+          ],
+          "scrollable": false,
+          "y": 104
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:scan",
+      "transitions": {
+        "on_result.status==found": "networks",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "loading_status": {
+      "screen": {
+        "title": "Connection Info",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking network...",
+              "size": "large",
+              "align": "center"
+            }
+          ],
+          "scrollable": false,
+          "y": 104
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:do_status",
+      "transitions": {
+        "on_result.status==status": "status",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "saving": {
+      "on_enter": "run:save_credentials",
+      "screen": {
+        "title": "Saving Wi-Fi",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Saving Wi-Fi settings",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "transitions": {
+        "on_result.status==saved": "connecting",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "disconnecting": {
+      "screen": {
+        "title": "Disconnecting Wi-Fi",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "",
+          "right": ""
+        },
+        "keys": {}
+      },
+      "transitions": {
+        "on_result.status==disconnected": "menu",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_enter": "run:do_disconnect"
+    }
+  }
+}
