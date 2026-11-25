@@ -546,7 +546,7 @@ class T5577PasswordFindPlugin:
             step+=1
 
     def _candidate_generator(self):
-        """Generate one whole region per PM3 batch, in spread-out order."""
+        """Yield candidates in spread-out order, allowing Hybrid v2 batch packing."""
         keys=()
         if self.mode in (0,2):
             keys=self._prepared_keys if self._prepared_keys is not None else dictionary(DIC)
@@ -556,7 +556,6 @@ class T5577PasswordFindPlugin:
         dictionary_keys=set(keys) if self.mode==2 else set()
         fmt=('%Y%m%d','%d%m%Y')[self.date_format_index]
         for indices in self._spread_ranges(total):
-            result=[]
             for index in indices:
                 if index<key_count:
                     key,phase=keys[index],'Dictionary'
@@ -566,27 +565,26 @@ class T5577PasswordFindPlugin:
                     if key in dictionary_keys:
                         continue
                     phase='Date'
-                result.append((key,phase))
-            yield result
+                yield key,phase
 
     def _next_batch(self):
         if self._pending_batch is not None:
             return list(self._pending_batch)
         keys=[]
         in_batch=set()
-        while not keys:
+        limit=min(CHK_BATCH_HARD_MAX,self._batch_size)
+        while len(keys)<limit:
             try:
-                region=next(self._sequence)
+                key,phase=next(self._sequence)
             except StopIteration:
                 break
-            for key,phase in region:
-                if key in self._seen or key in in_batch:
-                    if self._prepared_total is None:
-                        self._total=max(self._done,self._total-1)
-                    continue
-                in_batch.add(key)
-                keys.append(key)
-                self._phase=phase
+            if key in self._seen or key in in_batch:
+                if self._prepared_total is None:
+                    self._total=max(self._done,self._total-1)
+                continue
+            in_batch.add(key)
+            keys.append(key)
+            self._phase=phase
         if keys:
             self._pending_batch=tuple(keys)
         return keys
