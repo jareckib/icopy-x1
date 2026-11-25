@@ -798,3 +798,163 @@ class WiFiRemoteAccessPlugin(object):
         if not net_id.isdigit():
             raise RuntimeError('Cannot create network in WPA')
         try:
+            self._wpa_cli_command(iface, 'set_network', net_id, 'ssid', self._wpa_quote(ssid))
+            self._wpa_cli_command(iface, 'set_network', net_id, 'psk', self._wpa_quote(password))
+            self._wpa_cli_command(iface, 'set_network', net_id, 'key_mgmt', 'WPA-PSK')
+            self._wpa_cli_command(iface, 'enable_network', net_id)
+            self._wpa_cli_command(iface, 'select_network', net_id)
+            self._wpa_cli_command(iface, 'reassociate')
+        except Exception:
+            try:
+                self._wpa_cli_command(iface, 'remove_network', net_id)
+            except Exception:
+                pass
+            raise
+        return net_id
+
+    @staticmethod
+
+
+    def _launch_wpa(self, iface, conf):
+        for driver in ('nl80211', 'wext'):
+            pid = os.path.join(RUNTIME, 'wpa.pid')
+            # Avoid accidentally reusing a stale pid file.
+            try:
+                os.unlink(pid)
+            except OSError:
+                pass
+            cmd = ['wpa_supplicant', '-B', '-i', iface, '-c', conf,
+                   '-D', driver, '-P', pid]
+            rc, out, err = self._safe_run(cmd, timeout=16)
+            if rc == 0:
+                return True, driver
+            # Another service might have started WPA concurrently.
+            if self._wpa_cli_status(iface):
+                return False, 'existing'
+        return False, 'failed'
+
+    def do_connect(self):
+        iface = ''
+        try:
+            ssid, password = self._read_credentials()
+            interfaces = self._wireless_interfaces()
+            if not interfaces:
+                return self._error('No Wi-Fi adapter detected')
+            iface = interfaces[0]
+            if not shutil.which('wpa_supplicant') or not shutil.which('ip'):
+                return self._error('Missing WPA or IP tool')
+            os.makedirs(RUNTIME, mode=0o700, exist_ok=True)
+            os.chmod(RUNTIME, 0o700)
+            conf = os.path.join(RUNTIME, 'wpa.conf')
+            fd = os.open(conf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+                handle.write('ctrl_interface=/var/run/wpa_supplicant\ncountry=GB\n')
+                handle.write('network={\n  ssid=%s\n  psk=%s\n  key_mgmt=WPA-PSK\n}\n' %
+                             (self._wpa_quote(ssid), self._wpa_quote(password)))
+            rc, out, err = self._safe_run(['ip', 'link', 'set', iface, 'up'], timeout=8)
+            if rc != 0:
+                return self._error('Cannot activate Wi-Fi interface')
+            # Existing daemon is preferred; a second one produces an interface-busy error.
+            reused = bool(self._wpa_cli_status(iface))
+            managed_network_id = None
+            if reused:
+                if not shutil.which('wpa_cli'):
+                    return self._error('WPA control tool missing')
+                managed_network_id = self._configure_existing_wpa(iface, ssid, password)
+            else:
+                self._stop_own_wpa()
+                try:
+                    os.makedirs('/var/run/wpa_supplicant', mode=0o755, exist_ok=True)
+                except OSError:
+                    pass
+                started, driver = self._launch_wpa(iface, conf)
+                if not started:
+                    if driver == 'existing':
+                        managed_network_id = self._configure_existing_wpa(iface, ssid, password)
+                    else:
+                        return self._error('WPA start failed')
+            password = None
+            associated = False
+            for _ in range(20):
+                rc, out, err = self._safe_run(['wpa_cli', '-i', iface, 'status'], timeout=3)
+                if rc == 0 and 'wpa_state=COMPLETED' in out:
+                    associated = True
+                    break
+                time.sleep(1)
+            if not associated:
+                return self._error('Wi-Fi authentication failed or timed out')
+            if not self._dhcp(iface):
+                return self._error('DHCP failed. No IP assigned by router')
+            ip = self._ip_address(iface)
+            if not ip:
+                return self._error('No DHCP IPv4 address')
+            with open(os.path.join(RUNTIME, 'iface'), 'w') as handle:
+                handle.write(iface)
+            if managed_network_id is not None:
+                with open(os.path.join(RUNTIME, 'network_id'), 'w') as handle:
+                    handle.write(str(managed_network_id))
+            else:
+                try:
+                    os.unlink(os.path.join(RUNTIME, 'network_id'))
+                except OSError:
+                    pass
+            self._var('connection_info', 'IP: %s' % ip)
+            self._var('summary', 'Connected: %s' % ip)
+            self._var('ssh_text', self._ssh_description())
+            return {'status': 'connected'}
+        except Exception as exc:
+            return self._error('Connect failed: %s' % str(exc)[:70])
+
+    def _live_info(self):
+        found = []
+        for iface in self._wireless_interfaces():
+            ip = self._ip_address(iface)
+            if ip:
+                found.append('IP: %s' % ip)
+        return found[0] if found else 'Not connected'
+
+    def do_status(self):
+        try:
+            self._var('connection_info', self._live_info())
+            self._var('ssh_text', self._ssh_description())
+            return {'status': 'status'}
+        except Exception as exc:
+            return self._error('Status failed: %s' % str(exc)[:70])
+
+    def _ssh_description(self):
+        # Listening on :22 does not guarantee reachability or credentials.
+        for command in (['ss', '-ltn'], ['netstat', '-ltn']):
+            rc, out, _ = self._safe_run(command, timeout=5)
+            if rc == 0:
+                if re.search(r'(?:0\.0\.0\.0|\*|\[::\]|::):22\s', out):
+                    return self.tr('SSH: port 22 listening')
+                return self.tr('SSH: port 22 not on LAN')
+        return self.tr('SSH: status unknown')
+
+    def do_disconnect(self):
+        """Disconnect Wi-Fi regardless of who started wpa_supplicant.
+
+        Never terminate a system-managed WPA daemon or stop SSH.  Disabling
+        the plugin-added WPA network, disassociating, clearing its IPv4 and
+        bringing the adapter down is scoped to the chosen wireless device.
+        """
+        try:
+            iface = ''
+            try:
+                with open(os.path.join(RUNTIME, 'iface'), 'r') as handle:
+                    iface = handle.read().strip()
+            except OSError:
+                pass
+            available = self._wireless_interfaces()
+            if iface not in available:
+                iface = available[0] if available else ''
+            if not iface:
+                return self._error('No Wi-Fi adapter detected')
+
+            # Best-effort teardown through the existing wpa_supplicant.
+            if shutil.which('wpa_cli') and self._wpa_cli_status(iface):
+                network_id = ''
+                try:
+                    with open(os.path.join(RUNTIME, 'network_id'), 'r') as handle:
+                        network_id = handle.read().strip()
+                except OSError:
