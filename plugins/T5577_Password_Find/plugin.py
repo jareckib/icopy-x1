@@ -82,7 +82,7 @@ class T5577PasswordFindPlugin:
         self._prepared_keys=None;self._prepared_total=None
         self._action_index=0;self._pending_action=None;self._verified_block=None;self._old_password=None
         self._chip_type='';self._lf_id='';self._search_note='';self._p1_verified=False
-        self._pm3_serial=0;self._pending_batch=None;self._batch_size=CHK_BATCH_INITIAL;self._batch_index=0;self._last_batch_s=None;self._scan_started_mono=None;self._scan_started_wall=None;self._batch_timings=[];self._eta_line=self.tr('ETA: calculating');self._upper_line=self.tr('Upper: calculating');self._firmware_notice=''
+        self._pm3_serial=0;self._pending_batch=None;self._batch_size=CHK_BATCH_INITIAL;self._batch_index=0;self._last_batch_s=None;self._scan_started_mono=None;self._scan_started_wall=None;self._batch_timings=[];self._eta_line=self.tr('ETA: calculating');self._upper_line=self.tr('Upper: calculating');self._firmware_notice='';self._batch_uploaded=False
 
     def var(self,k,v):self.host.set_var(k,str(v))
     def tr(self,v):
@@ -707,6 +707,39 @@ class T5577PasswordFindPlugin:
             if registered:
                 unregister(on_output)
 
+    def _cleanup_search_batches(self):
+        """Remove only the temporary scan batch and its PM3 SPIFFS dictionary.
+
+        Called from run:do_search after terminal search results, never in a
+        call: UI handler. Do not send a command to a blocked/closed reader.
+        """
+        try:
+            if self._batch_uploaded and not self._reader_blocked and not self._closed:
+                try:
+                    self._executor_command('mem spiffs remove -f dict_t55xx.bin',
+                                           12000, 'cleanup')
+                except Exception:
+                    pass  # Cleanup must not hide the search result.
+        finally:
+            self._batch_uploaded=False
+            for path in (CHK_BATCH, CHK_BATCH + '.new'):
+                try:
+                    if os.path.isfile(path):
+                        os.remove(path)
+                except OSError:
+                    pass
+
+    def do_search(self):
+        """Run one batch and clean temporary files on every terminal result."""
+        try:
+            result=self._do_search_batch()
+        except Exception:
+            self._cleanup_search_batches()
+            raise
+        if isinstance(result,dict) and result.get('status')!='more':
+            self._cleanup_search_batches()
+        return result
+
     def _chk_batch(self):
         """Upload candidate keys to PM3 SPIFFS, then check on the ARM chip.
 
@@ -715,6 +748,7 @@ class T5577PasswordFindPlugin:
         original Block0 must indicate password protection.
         """
         upload='mem load -f %s -t' % CHK_BATCH
+        self._batch_uploaded=True
         ret,loaded=self._executor_command(upload, LOAD_TIMEOUT_MS, 'upload')
         m=re.search(r'Wrote\s+(\d+)\s+passwords\s+to file\s+dict_t55xx\.bin', loaded, re.I)
         expected=len(self._pending_batch or ())
@@ -729,7 +763,7 @@ class T5577PasswordFindPlugin:
     def draw_search_ready(self):
         self._draw_lines([self.tr('Ready to search'),self.tr('ARM flash dictionary'),self.host.tr('First: %d keys')%CHK_BATCH_INITIAL,self.tr('OK - Start search')])
 
-    def do_search(self):
+    def _do_search_batch(self):
         # One bounded chk -m operation per UI state entry; UI transitions
         # automatically to the next batch, without asking for Continue.
         if not self.protected or not self._p1_verified:
@@ -737,6 +771,7 @@ class T5577PasswordFindPlugin:
         if self.mode in (1,2) and self.start and self.end and self.end<self.start:
             return self.error(self.tr('End before start'))
         if not self._scan_ready:
+            self._batch_uploaded=False
             if not self._inspect_source_dictionary():
                 return self.error(self.tr('Dictionary missing'))
             if self.mode in (1,2) and (not self.start or not self.end):
