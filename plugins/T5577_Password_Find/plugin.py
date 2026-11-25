@@ -725,8 +725,7 @@ class T5577PasswordFindPlugin:
                     # The Iceman client prints this only after an ACK with
                     # PM3_SUCCESS from SPIFFS_REMOVE.
                     removed=bool(re.search(
-                        r"\bRemoved\s+[`'\\"]?dict_t55xx\.bin[`'\\"]?",
-                        clean,re.I))
+                        r'Removed\\s+.*dict_t55xx\\.bin',clean,re.I))
                     if ret == -1 or not removed or re.search(
                             r'failed to remove|timeout while waiting',clean,re.I):
                         failures.append('PM3 dictionary not removed')
