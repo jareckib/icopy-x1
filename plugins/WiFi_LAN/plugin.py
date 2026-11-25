@@ -318,3 +318,163 @@ class WiFiRemoteAccessPlugin(object):
         page_item = canvas.create_text(
             120, 196, text=self.tr('Page %d/%d') % (page + 1, pages),
             anchor='s', font=('Courier New', 9), fill=color,
+            tags=(tag, '_jr_content'))
+        page_bbox = canvas.bbox(page_item)
+        hint_item = canvas.create_text(
+            120, 175, text=self.tr('OK - Select'), anchor='s',
+            font=('Courier New', 10), fill=color,
+            tags=(tag, '_jr_content'))
+        hint_bbox = canvas.bbox(hint_item)
+        if page_bbox and hint_bbox:
+            # Tk canvas bbox has half-open outer edges; the empty gap is 2 px.
+            canvas.move(hint_item, 0, page_bbox[1] - 2 - hint_bbox[3])
+
+    def _draw_info_screen(self, state, tag, lines, hint=None):
+        if getattr(self.host, '_current_state_id', None) != state:
+            return
+        canvas = self.host.getCanvas()
+        canvas.delete(tag)
+        canvas.create_rectangle(0, 49, 239, 198, fill='white', outline='',
+                                tags=(tag, '_jr_content'))
+        # Wrap all fields sequentially: the old formula (i * 2 + j)
+        # overlapped rows when a field wrapped to three lines.
+        rendered = []
+        for line in lines:
+            txt = self.tr(str(line))
+            rendered.extend(textwrap.wrap(txt, width=21,
+                                          break_long_words=True,
+                                          break_on_hyphens=False) or [''])
+        if len(rendered) > 5:
+            rendered = rendered[:5]
+            rendered[-1] = rendered[-1][:18].rstrip() + '...'
+        spacing = 19
+        first_y = 75 if len(rendered) >= 4 else 86
+        for index, chunk in enumerate(rendered):
+            canvas.create_text(120, first_y + index * spacing, text=chunk,
+                               anchor='n', font=('Courier New', 12),
+                               fill='#555555', tags=(tag, '_jr_content'))
+        if hint:
+            self._draw_action_hint(tag, hint)
+
+    def draw_status_screen(self):
+        self._draw_status_now()
+        canvas = self.host.getCanvas()
+        if hasattr(canvas, 'after_idle'):
+            canvas.after_idle(self._draw_status_now)
+
+    def _draw_status_now(self):
+        values = getattr(self.host, '_state', {}) or {}
+        info = values.get('connection_info', 'Not connected')
+        ssh = values.get('ssh_text', 'SSH: checking on status')
+        self._draw_info_screen('status', '_wifi_status', [str(info), str(ssh)],
+                               'OK - Refresh')
+
+    def draw_error(self):
+        self._draw_error_now()
+        self._draw_action_hint('_wifi_error', 'OK - Menu')
+        canvas = self.host.getCanvas() if self.host else None
+        if canvas is not None and hasattr(canvas, 'after_idle'):
+            canvas.after_idle(self._draw_error_and_hint)
+
+    def _draw_error_and_hint(self):
+        if getattr(self.host, '_current_state_id', None) == 'error':
+            self._draw_error_now()
+            self._draw_action_hint('_wifi_error', 'OK - Menu')
+
+    def _draw_choice_list(self, tag, entries, selected):
+        canvas = self.host.getCanvas()
+        canvas.delete(tag)
+        # Separate from _jr_content so host.onResume cannot erase the menu.
+        canvas.create_rectangle(0, 49, 239, 198, fill='white', outline='',
+                                tags=(tag, '_jr_content'))
+        total = len(entries)
+        # Five 12-px rows fit above the two-line footer on every page.
+        visible = self._VISIBLE_ROWS
+        pages = max(1, (total + visible - 1) // visible)
+        page = min(max(0, selected // visible), pages - 1)
+        begin = page * visible
+        for row, index in enumerate(range(begin, min(begin + visible, total))):
+            y = 68 + row * 20
+            if index == selected:
+                canvas.create_rectangle(6, y - 10, 234, y + 11,
+                                        fill='#38A757', outline='',
+                                        tags=(tag, '_jr_content'))
+            label = self.tr(str(entries[index]))
+            if len(label) > 21:
+                label = label[:18] + '...'
+            canvas.create_text(15, y, anchor='w', text=label,
+                               font=('Courier New', 12),
+                               fill='#FFFFFF' if index == selected else '#555555',
+                               tags=(tag, '_jr_content'))
+        self._draw_paged_footer(canvas, tag, page, pages)
+        # Match Dump Diff 2 / Emergency Backup / Paxton CloneDown precisely:
+        # arrows on the extreme right border, not inside the list rows.
+        if page > 0:
+            canvas.create_text(235, 43, text='▲', anchor='ne',
+                               font=('Arial', 9), fill='#1647D6',
+                               tags=(tag, '_jr_content'))
+        if page + 1 < pages:
+            canvas.create_text(235, 198, text='▼', anchor='se',
+                               font=('Arial', 9), fill='#1647D6',
+                               tags=(tag, '_jr_content'))
+
+    def _draw_menu_now(self):
+        if getattr(self.host, '_current_state_id', None) != 'menu':
+            return
+        self._draw_choice_list('_wifi_menu',
+                               [label for label, _ in self._MENU_ITEMS],
+                               self._menu_index)
+
+    def draw_menu(self):
+        # PluginActivity.onResume may clear _jr_content just after onCreate.
+        # Queue one redraw after initialization and check current state first.
+        canvas = self.host.getCanvas()
+        self._draw_menu_now()
+        if hasattr(canvas, 'after_idle'):
+            canvas.after_idle(self._draw_menu_now)
+
+    def clear_menu(self):
+        self.host.getCanvas().delete('_wifi_menu')
+
+    def menu_up(self):
+        self._menu_index = (self._menu_index - 1) % len(self._MENU_ITEMS)
+        self.draw_menu()
+
+    def menu_down(self):
+        self._menu_index = (self._menu_index + 1) % len(self._MENU_ITEMS)
+        self.draw_menu()
+
+    def menu_select(self):
+        self.clear_menu()
+        return {'choice': ('scan', 'saved', 'manual', 'info', 'disconnect')[self._menu_index]}
+
+    def _network_entries(self):
+        names = self._networks
+        return names + ['Manual SSID', 'Rescan']
+
+    def _draw_networks_now(self):
+        if getattr(self.host, '_current_state_id', None) != 'networks':
+            return
+        self._network_index = min(self._network_index, len(self._network_entries()) - 1)
+        self._draw_choice_list('_wifi_networks', self._network_entries(),
+                               self._network_index)
+
+    def draw_networks(self):
+        canvas = self.host.getCanvas()
+        self._draw_networks_now()
+        if hasattr(canvas, 'after_idle'):
+            canvas.after_idle(self._draw_networks_now)
+
+    def clear_networks(self):
+        self.host.getCanvas().delete('_wifi_networks')
+
+    def networks_up(self):
+        self._network_index = (self._network_index - 1) % len(self._network_entries())
+        self.draw_networks()
+
+    def networks_down(self):
+        self._network_index = (self._network_index + 1) % len(self._network_entries())
+        self.draw_networks()
+
+    def networks_select(self):
+        selected = self._network_index
