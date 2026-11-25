@@ -1,0 +1,12 @@
+{
+  "name": "Wi-Fi LAN",
+  "version": "0.2.34",
+  "author": "jareckib",
+  "description": "WPA2 Wi-Fi scanning, saved connections, DHCP, disconnect and SSH/SFTP status for iCopy-X/XS (2026 jareckib)",
+  "entry_class": "WiFiRemoteAccessPlugin",
+  "permissions": [
+    "shell",
+    "filesystem"
+  ],
+  "order": 96
+}
