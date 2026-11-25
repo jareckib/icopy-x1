@@ -113,13 +113,13 @@ class T5577PasswordFindPlugin:
         except (ImportError,AttributeError): pass
     def on_destroy(self):
         self._closed=True;self.cancel.set();self.hide_dec();self.hide_hex()
-    def _draw_lines(self, lines=(), color='#555555'):
+    def _draw_lines(self, lines=(), color='#555555', fixed_size=None):
         from tkinter import font as tkfont
         from lib import resources
         c=self.host.getCanvas();tag='_t5577_screen';c.delete(tag)
         c.create_rectangle(0,49,239,198,fill='white',outline='',tags=(tag,'_jr_content'))
         translated=[self.tr(str(v)) for v in lines if v is not None]
-        for size in (16,14,12):
+        for size in ((fixed_size,) if fixed_size else (16,14,12)):
             font=resources.get_font(size);face=tkfont.Font(root=c,font=font)
             rows=[]
             for text in translated:
@@ -186,7 +186,7 @@ class T5577PasswordFindPlugin:
         'action_failure':[self.tr('Operation not verified'),self.tr('Check tag state')],
         'date_summary':[self.tr('Dates generated in RAM')],
         }
-        self._draw_lines(info.get(name,[]),'#C62828' if name in ('error','unknown','already_locked','action_failure','confirm_locked','scan_warning','p1_failed','firmware_notice','absent','search_failed','detect_failed') else '#555555')
+        self._draw_lines(info.get(name,[]),'#C62828' if name in ('error','unknown','already_locked','action_failure','confirm_locked','scan_warning','p1_failed','firmware_notice','absent','search_failed','detect_failed') else '#555555',fixed_size=12 if name=='error' and getattr(self,'_cleanup_error',None) and getattr(self,'_error_full','')==self.tr('Cleanup failed') else None)
     def set_screen(self,name):self._screen_name=name;self._info_page=0;self.show_info()
     def draw_action_menu(self):
         names=(self.tr('Remove Password'),self.tr('Change Password'),self.tr('Wipe'),self.tr('Back'))
@@ -754,7 +754,7 @@ class T5577PasswordFindPlugin:
             failures=self._cleanup_search_batches()
             if failures:
                 self._cleanup_error='; '.join(failures)
-                return self.error('Cleanup failed: '+self._cleanup_error)
+                return self.error(self.tr('Cleanup failed'))
         return result
 
     def _chk_batch(self):
