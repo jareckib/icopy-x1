@@ -287,9 +287,15 @@
         "title": "Disconnecting Wi-Fi",
         "content": {
           "type": "text",
-          "lines": [],
+          "lines": [
+            {
+              "text": "Disconnecting....",
+              "size": "large",
+              "align": "center"
+            }
+          ],
           "scrollable": false,
-          "y": 54
+          "y": 104
         },
         "buttons": {
           "left": "",
