@@ -824,7 +824,8 @@
         "on_error": "error",
         "on_result.status==error": "error",
         "on_result.status==more": "batch_prepare",
-        "on_result.status==detect_failed": "detect_failed"
+        "on_result.status==detect_failed": "detect_failed",
+        "on_result.status==cleanup_error": "cleanup_error"
       }
     },
     "batch_prepare": {
@@ -985,6 +986,58 @@
         }
       },
       "on_exit": "call:clear_screen"
+    },
+    "cleanup_error": {
+      "screen": {
+        "title": "T5577 Password Find",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Retry"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "M2": "set_state:cleanup_retry",
+          "OK": "set_state:cleanup_retry"
+        }
+      },
+      "on_enter": "call:screen_cleanup_error",
+      "on_exit": "call:clear_screen"
+    },
+    "cleanup_retry": {
+      "screen": {
+        "title": "T5577 Password Find",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Cleaning up...",
+              "size": "medium",
+              "align": "center"
+            }
+          ],
+          "y": 110
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:retry_cleanup",
+      "transitions": {
+        "on_result.status==cleanup_error": "cleanup_error",
+        "on_result.status==found": "save_prompt",
+        "on_result.status==none": "not_found",
+        "on_result.status==cancel": "cancelled",
+        "on_result.status==error": "error",
+        "on_result.status==unsafe": "unknown",
+        "on_result.status==detect_failed": "detect_failed",
+        "on_error": "error"
+      }
     }
   }
 }
