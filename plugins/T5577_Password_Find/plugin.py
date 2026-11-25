@@ -497,58 +497,96 @@ class T5577PasswordFindPlugin:
         self.var('date_passwords',self._prepared_total)
         return {'status':'ready'}
 
+    def _spread_ranges(self, count):
+        """Select contiguous batches from start, end, middle, then widest gaps.
+
+        Batch size is read afresh for each request. Memory use is proportional
+        to the number of remaining intervals, never the number of dates.
+        """
+        remaining=[(0,count)]
+        step=0
+        while remaining:
+            size=min(CHK_BATCH_HARD_MAX,self._batch_size)
+            if step == 0:
+                pos=0
+            elif step == 1:
+                pos=count-1
+            elif step == 2:
+                pos=count//2
+            else:
+                pos=None
+            selected=None
+            if pos is not None:
+                for i,(lo,hi) in enumerate(remaining):
+                    if lo<=pos<hi:
+                        selected=i
+                        break
+            if selected is None:
+                # Widest untested interval, stable left-first tie breaking.
+                selected=max(range(len(remaining)),
+                             key=lambda i:(remaining[i][1]-remaining[i][0],
+                                           -remaining[i][0]))
+                pos=None
+            lo,hi=remaining.pop(selected)
+            take=min(size,hi-lo)
+            if step == 0 and lo == 0:
+                begin=lo
+            elif step == 1 and hi == count:
+                begin=hi-take
+            elif pos is not None:
+                begin=max(lo,min(hi-take,pos-take//2))
+            else:
+                begin=lo+(hi-lo-take)//2
+            end=begin+take
+            if lo<begin:
+                remaining.append((lo,begin))
+            if end<hi:
+                remaining.append((end,hi))
+            yield range(begin,end)
+            step+=1
+
     def _candidate_generator(self):
+        """Generate one whole region per PM3 batch, in spread-out order."""
+        keys=()
         if self.mode in (0,2):
             keys=self._prepared_keys if self._prepared_keys is not None else dictionary(DIC)
-            dictionary_keys=set(keys)
-            date_count=(self.end-self.start).days+1 if self.mode==2 else 0
-            left,right=0,len(keys)+date_count
-            from_start=True
-            while left<right:
-                # One logical list: dictionary followed by chronological dates.
-                # Generate only the current batch, never the full date list.
-                batch=[]
-                limit=min(CHK_BATCH_HARD_MAX,self._batch_size)
-                while left<right and len(batch)<limit:
-                    if from_start:
-                        index=left;left+=1
-                    else:
-                        right-=1;index=right
-                    if index<len(keys):
-                        key,phase=keys[index],'Dictionary'
-                    else:
-                        day=self.start+datetime.timedelta(days=index-len(keys))
-                        key=day.strftime(('%Y%m%d','%d%m%Y')[self.date_format_index])
-                        if key in dictionary_keys:
-                            continue
-                        phase='Date'
-                    batch.append((key,phase))
-                if not from_start:
-                    batch.reverse()
-                from_start=not from_start
-                for candidate in batch:
-                    yield candidate
-        elif self.mode==1:
-            for key in dates(self.start,self.end,formats=(('YYYYMMDD','DDMMYYYY')[self.date_format_index],)):yield key,'Date'
+        key_count=len(keys)
+        date_count=((self.end-self.start).days+1) if self.mode in (1,2) else 0
+        total=key_count+date_count
+        dictionary_keys=set(keys) if self.mode==2 else set()
+        fmt=('%Y%m%d','%d%m%Y')[self.date_format_index]
+        for indices in self._spread_ranges(total):
+            result=[]
+            for index in indices:
+                if index<key_count:
+                    key,phase=keys[index],'Dictionary'
+                else:
+                    day=self.start+datetime.timedelta(days=index-key_count)
+                    key=day.strftime(fmt)
+                    if key in dictionary_keys:
+                        continue
+                    phase='Date'
+                result.append((key,phase))
+            yield result
 
     def _next_batch(self):
         if self._pending_batch is not None:
             return list(self._pending_batch)
         keys=[]
         in_batch=set()
-        while len(keys)<min(CHK_BATCH_HARD_MAX,self._batch_size):
+        while not keys:
             try:
-                key,phase=next(self._sequence)
+                region=next(self._sequence)
             except StopIteration:
                 break
-            if key in self._seen or key in in_batch:
-                # Duplicates must not inflate percentages or be uploaded twice.
-                if self._prepared_total is None:
-                    self._total=max(self._done, self._total-1)
-                continue
-            in_batch.add(key)
-            keys.append(key)
-            self._phase=phase
+            for key,phase in region:
+                if key in self._seen or key in in_batch:
+                    if self._prepared_total is None:
+                        self._total=max(self._done,self._total-1)
+                    continue
+                in_batch.add(key)
+                keys.append(key)
+                self._phase=phase
         if keys:
             self._pending_batch=tuple(keys)
         return keys
