@@ -1,0 +1,1180 @@
+{
+  "plugin": true,
+  "name": "Remote Access",
+  "version": "1.0.0",
+  "initial_state": "menu",
+  "states": {
+    "menu": {
+      "screen": {
+        "title": "Remote Access",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Select"
+        },
+        "keys": {
+          "UP": "call:menu_up",
+          "DOWN": "call:menu_down",
+          "OK": "call:menu_select",
+          "M1": "finish",
+          "M2": "call:menu_select"
+        }
+      },
+      "transitions": {
+        "on_result.choice==scan": "scanning",
+        "on_result.choice==saved": "connecting",
+        "on_result.choice==manual": "ssid",
+        "on_result.choice==info": "loading_status",
+        "on_result.choice==disconnect": "disconnecting",
+        "on_error": "error",
+        "on_result.choice==files": "files_loading",
+        "on_result.choice==ssh": "ssh_loading",
+        "on_result.choice==usb": "usb_loading",
+        "on_result.choice==serial": "serial_loading",
+        "on_result.choice==stop": "stop_confirm",
+        "on_result.choice==file_manager": "files_loading",
+        "on_result.choice==serial_ssh": "ssh_loading",
+        "on_result.choice==serial_file_manager": "serial_file_manager",
+        "on_result.choice==direct": "direct_confirm"
+      },
+      "on_enter": "call:draw_menu",
+      "on_exit": "call:clear_menu"
+    },
+    "networks": {
+      "screen": {
+        "title": "Wi-Fi Scan",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Select"
+        },
+        "keys": {
+          "UP": "call:networks_up",
+          "DOWN": "call:networks_down",
+          "OK": "call:networks_select",
+          "M1": "set_state:menu",
+          "M2": "call:networks_select"
+        }
+      },
+      "transitions": {
+        "on_result.choice==password": "password",
+        "on_result.choice==manual": "ssid",
+        "on_result.choice==rescan": "scanning",
+        "on_error": "error"
+      },
+      "on_enter": "call:draw_networks",
+      "on_exit": "call:clear_networks"
+    },
+    "ssid": {
+      "screen": {
+        "title": "Network SSID",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 55
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "ABC"
+        },
+        "keys": {
+          "OK": "call:accept_ssid",
+          "M1": "set_state:menu",
+          "M2": "input:charset"
+        }
+      },
+      "on_enter": "call:input_ssid",
+      "transitions": {
+        "on_result.status==password": "password",
+        "on_error": "error"
+      }
+    },
+    "password": {
+      "screen": {
+        "title": "Wi-Fi Password",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 50
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "ABC"
+        },
+        "keys": {
+          "OK": "call:finish_password",
+          "M1": "call:discard_password",
+          "M2": "input:charset",
+          "ALL": "call:restart_password"
+        }
+      },
+      "on_enter": "call:input_password",
+      "transitions": {
+        "on_result.status==save": "saving",
+        "on_result.status==error": "error",
+        "on_result.status==menu": "menu",
+        "on_error": "error"
+      }
+    },
+    "connecting": {
+      "screen": {
+        "title": "Connecting...",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Connecting to Wi-Fi...",
+              "size": "large"
+            },
+            {
+              "text": "Getting IP via DHCP.",
+              "size": "large"
+            },
+            {
+              "text": "Do not power off.",
+              "size": "large"
+            }
+          ],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": " "
+        },
+        "keys": {
+          "M1": "set_state:menu"
+        }
+      },
+      "on_enter": "run:do_connect",
+      "transitions": {
+        "on_result.status==connected": "files",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "status": {
+      "screen": {
+        "title": "Connection Status",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "{status_line0}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{status_line1}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{status_line2}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{status_line3}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{status_line4}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{status_hint}",
+              "align": "center",
+              "size": "small"
+            }
+          ],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "OK": "set_state:loading_status",
+          "M1": "set_state:menu",
+          "M2": "set_state:loading_status",
+          "UP": "call:status_prev",
+          "DOWN": "call:status_next"
+        }
+      },
+      "transitions": {
+        "on_result.status==status": "status",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_enter": "call:draw_status_screen",
+      "on_exit": "call:clear_custom"
+    },
+    "error": {
+      "screen": {
+        "title": "Remote Access",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Menu"
+        },
+        "keys": {
+          "OK": "set_state:menu",
+          "M1": "set_state:menu",
+          "M2": "set_state:menu"
+        }
+      },
+      "on_enter": "call:draw_error",
+      "on_exit": "call:clear_error"
+    },
+    "scanning": {
+      "screen": {
+        "title": "Wi-Fi Scan",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Scanning networks...",
+              "size": "large",
+              "align": "center"
+            }
+          ],
+          "scrollable": false,
+          "y": 104
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:scan",
+      "transitions": {
+        "on_result.status==found": "networks",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "loading_status": {
+      "screen": {
+        "title": "Connection Status",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking network...",
+              "size": "large",
+              "align": "center"
+            }
+          ],
+          "scrollable": false,
+          "y": 104
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:do_status",
+      "transitions": {
+        "on_result.status==status": "status",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "saving": {
+      "on_enter": "run:save_credentials",
+      "screen": {
+        "title": "Saving Wi-Fi",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Saving Wi-Fi settings",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "transitions": {
+        "on_result.status==saved": "connecting",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "disconnecting": {
+      "screen": {
+        "title": "Disconnecting Wi-Fi",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "",
+          "right": ""
+        },
+        "keys": {}
+      },
+      "transitions": {
+        "on_result.status==disconnected": "menu",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_enter": "run:do_disconnect"
+    },
+    "mirror_loading": {
+      "screen": {
+        "title": "Screen Mirror",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking mirror...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:mirror_status",
+      "transitions": {
+        "on_result.status==mirror": "mirror",
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==mirror_transport": "mirror_transport",
+        "on_result.status==mirror_mode": "mirror_mode"
+      }
+    },
+    "mirror": {
+      "screen": {
+        "title": "Screen Mirror",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:mirror_start",
+          "M2": "set_state:mirror_loading"
+        }
+      },
+      "on_enter": "call:draw_mirror_screen",
+      "transitions": {
+        "on_result.status==mirror": "mirror",
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==mirror_transport": "mirror_transport",
+        "on_result.status==mirror_mode": "mirror_mode"
+      },
+      "on_exit": "call:clear_custom"
+    },
+    "mirror_mode": {
+      "screen": {
+        "title": "Connection mode",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Select"
+        },
+        "keys": {
+          "UP": "call:mirror_mode_up",
+          "DOWN": "call:mirror_mode_up",
+          "OK": "call:mirror_mode_select",
+          "M2": "call:mirror_mode_select",
+          "M1": "set_state:mirror_transport"
+        }
+      },
+      "on_enter": "call:draw_mirror_mode",
+      "on_exit": "call:clear_mirror_mode",
+      "transitions": {
+        "on_result.choice==start": "mirror_start"
+      }
+    },
+    "mirror_start": {
+      "screen": {
+        "title": "Screen Mirror",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Starting mirror...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:mirror_toggle",
+      "transitions": {
+        "on_result.status==mirror": "mirror",
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==mirror_transport": "mirror_transport",
+        "on_result.status==mirror_mode": "mirror_mode"
+      }
+    },
+    "mirror_transport": {
+      "screen": {
+        "title": "Connection type",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Select"
+        },
+        "keys": {
+          "UP": "call:mirror_transport_up",
+          "DOWN": "call:mirror_transport_down",
+          "OK": "call:mirror_transport_select",
+          "M2": "call:mirror_transport_select",
+          "M1": "set_state:menu"
+        }
+      },
+      "on_enter": "call:draw_mirror_transport",
+      "on_exit": "call:clear_mirror_transport",
+      "transitions": {
+        "on_result.choice==selected": "mirror_mode"
+      }
+    },
+    "files_loading": {
+      "screen": {
+        "title": "Secure Access",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking service...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:files_status",
+      "transitions": {
+        "on_result.status==files": "files",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "files": {
+      "screen": {
+        "title": "Secure Access",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:files_switch",
+          "M2": "set_state:files_loading",
+          "UP": "call:files_prev",
+          "DOWN": "call:files_next",
+          "RIGHT": "set_state:files_expert_confirm"
+        }
+      },
+      "on_enter": "call:draw_files",
+      "transitions": {
+        "on_result.status==files": "files",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_exit": "call:clear_custom"
+    },
+    "ssh_loading": {
+      "screen": {
+        "title": "SSH Terminal",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking service...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:ssh_status",
+      "transitions": {
+        "on_result.status==ssh": "ssh",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "ssh": {
+      "screen": {
+        "title": "SSH Terminal",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:ssh_loading",
+          "M2": "set_state:ssh_loading"
+        }
+      },
+      "on_enter": "call:draw_ssh",
+      "transitions": {
+        "on_result.status==ssh": "ssh",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_exit": "call:clear_custom"
+    },
+    "usb_loading": {
+      "screen": {
+        "title": "USB Network",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking service...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:usb_status",
+      "transitions": {
+        "on_result.status==usb": "usb",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "usb": {
+      "screen": {
+        "title": "USB Network",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:usb_switch",
+          "M2": "set_state:usb_loading"
+        }
+      },
+      "on_enter": "call:draw_usb",
+      "transitions": {
+        "on_result.status==usb": "usb",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      },
+      "on_exit": "call:clear_custom"
+    },
+    "files_expert_confirm": {
+      "screen": {
+        "title": "Expert Mode",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Confirm"
+        },
+        "keys": {
+          "M1": "set_state:files_loading",
+          "OK": "run:files_expert_start",
+          "M2": "run:files_expert_start"
+        }
+      },
+      "on_enter": "call:draw_expert_warning",
+      "transitions": {
+        "on_result.status==files": "files",
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==battery_locked": "battery_locked"
+      },
+      "on_exit": "call:clear_custom"
+    },
+    "battery_locked": {
+      "screen": {
+        "title": "Remote Access",
+        "content": {
+          "type": "text",
+          "lines": [],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": null
+        },
+        "keys": {
+          "OK": "set_state:files_loading",
+          "M1": "set_state:files_loading",
+          "M2": "set_state:files_loading"
+        }
+      },
+      "on_enter": "call:draw_battery_locked",
+      "on_exit": "call:clear_battery_locked"
+    },
+    "diag_loading": {
+      "screen": {
+        "title": "Diagnostics",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking device...",
+              "size": "large"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:diagnostics",
+      "transitions": {
+        "on_result.status==diag": "diag",
+        "on_error": "error"
+      }
+    },
+    "diag": {
+      "screen": {
+        "title": "Diagnostics",
+        "content": {
+          "type": "text",
+          "lines": []
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:diag_loading",
+          "M2": "set_state:diag_loading"
+        }
+      },
+      "on_enter": "call:draw_diagnostics",
+      "on_exit": "call:clear_custom"
+    },
+    "serial_loading": {
+      "screen": {
+        "title": "USB Serial",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Checking service...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:serial_status",
+      "transitions": {
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==serial": "serial"
+      }
+    },
+    "serial": {
+      "screen": {
+        "title": "USB Serial",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "{serial_line0}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{serial_line1}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{serial_line2}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{serial_line3}",
+              "align": "center",
+              "size": "medium"
+            },
+            {
+              "text": "{serial_hint}",
+              "align": "center",
+              "size": "small"
+            }
+          ],
+          "scrollable": false,
+          "y": 54
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:serial_switch",
+          "M2": "set_state:serial_loading"
+        }
+      },
+      "on_enter": "call:draw_serial",
+      "transitions": {
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==serial": "serial"
+      },
+      "on_exit": "call:clear_custom"
+    },
+    "stop_confirm": {
+      "screen": {
+        "title": "Stop services",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Finish transfers",
+              "size": "large",
+              "align": "center"
+            },
+            {
+              "text": "Disconnect phone",
+              "size": "large",
+              "align": "center"
+            },
+            {
+              "text": "Stop remote services?",
+              "size": "large",
+              "align": "center"
+            },
+            {
+              "text": "OK - Confirm",
+              "size": "large",
+              "align": "center"
+            }
+          ],
+          "scrollable": false,
+          "y": 62
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Confirm"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:stopping",
+          "M2": "set_state:stopping"
+        }
+      }
+    },
+    "stopping": {
+      "screen": {
+        "title": "Stop services",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Stopping services...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:stop_services",
+      "transitions": {
+        "on_result.status==status": "status",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "serial_switch": {
+      "screen": {
+        "title": "USB Serial",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Please wait...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:serial_toggle",
+      "transitions": {
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==serial": "serial",
+        "on_result.status==serial_confirm": "serial_confirm"
+      }
+    },
+    "usb_switch": {
+      "screen": {
+        "title": "USB Network",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Please wait...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:usb_select",
+      "transitions": {
+        "on_result.status==usb": "usb",
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==files": "files"
+      }
+    },
+    "files_switch": {
+      "screen": {
+        "title": "Secure Access",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Please wait...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:files_toggle",
+      "transitions": {
+        "on_result.status==files": "files",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "serial_mirror": {
+      "screen": {
+        "title": "Screen Mirror",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "USB Serial",
+              "align": "center"
+            },
+            {
+              "text": "View and control",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Refresh"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "call:draw_serial_mirror_info",
+          "M2": "call:draw_serial_mirror_info"
+        }
+      },
+      "on_enter": "call:draw_serial_mirror_info",
+      "on_exit": "call:clear_custom"
+    },
+    "serial_ssh": {
+      "screen": {
+        "title": "SSH Terminal",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "USB Serial",
+              "align": "center"
+            },
+            {
+              "text": "Use SSH on phone",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": "Back",
+          "right": null
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:ssh_loading"
+        }
+      },
+      "on_enter": "call:draw_serial_ssh_info",
+      "on_exit": "call:clear_custom"
+    },
+    "serial_file_manager": {
+      "screen": {
+        "title": "File Manager",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "USB Serial",
+              "align": "center"
+            },
+            {
+              "text": "Files not available",
+              "align": "center"
+            },
+            {
+              "text": "Planned feature",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": "Back",
+          "right": null
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:menu"
+        }
+      },
+      "on_enter": "call:draw_serial_files_info",
+      "on_exit": "call:clear_custom"
+    },
+    "direct_confirm": {
+      "screen": {
+        "title": "Wi-Fi Direct",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Wi-Fi Direct",
+              "size": "large",
+              "align": "center"
+            },
+            {
+              "text": "OK - Connect",
+              "size": "medium",
+              "align": "center"
+            }
+          ],
+          "y": 75
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Connect"
+        },
+        "keys": {
+          "M1": "set_state:menu",
+          "OK": "set_state:direct_start",
+          "M2": "set_state:direct_start"
+        }
+      }
+    },
+    "direct_start": {
+      "screen": {
+        "title": "Wi-Fi Direct",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Please wait...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:direct_start",
+      "transitions": {
+        "on_result.status==files": "files",
+        "on_result.status==error": "error",
+        "on_error": "error"
+      }
+    },
+    "serial_confirm": {
+      "screen": {
+        "title": "USB Serial",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Eject disk on PC",
+              "size": "medium",
+              "align": "center"
+            },
+            {
+              "text": "Unplug USB cable",
+              "size": "medium",
+              "align": "center"
+            },
+            {
+              "text": "Cable disconnected?",
+              "size": "medium",
+              "align": "center"
+            },
+            {
+              "text": "OK - Confirm",
+              "size": "medium",
+              "align": "center"
+            }
+          ],
+          "scrollable": false,
+          "y": 62
+        },
+        "buttons": {
+          "left": "Back",
+          "right": "Confirm"
+        },
+        "keys": {
+          "M1": "set_state:serial_loading",
+          "OK": "set_state:serial_confirm_switch",
+          "M2": "set_state:serial_confirm_switch"
+        }
+      }
+    },
+    "serial_confirm_switch": {
+      "screen": {
+        "title": "USB Serial",
+        "content": {
+          "type": "text",
+          "lines": [
+            {
+              "text": "Please wait...",
+              "size": "large",
+              "align": "center"
+            }
+          ]
+        },
+        "buttons": {
+          "left": null,
+          "right": null
+        },
+        "keys": {}
+      },
+      "on_enter": "run:serial_confirmed",
+      "transitions": {
+        "on_result.status==error": "error",
+        "on_error": "error",
+        "on_result.status==serial": "serial"
+      }
+    }
+  }
+}

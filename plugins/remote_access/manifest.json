@@ -1,0 +1,12 @@
+{
+  "name": "Remote Access",
+  "version": "1.0.0",
+  "author": "jareckib",
+  "description": "Experimental USB Serial screen mirror, remote control and SSH for Android.",
+  "entry_class": "WiFiRemoteAccessPlugin",
+  "permissions": [
+    "shell",
+    "filesystem"
+  ],
+  "order": 96
+}

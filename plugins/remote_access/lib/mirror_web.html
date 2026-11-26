@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+Copyright (c) 2026 jareckib
+Remote Access for iCopy-X/XS — original project code.
+Licensed under the PolyForm Noncommercial License 1.0.0:
+https://polyformproject.org/licenses/noncommercial/1.0.0
+Third-party components retain their original licences and notices.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>iCopy-XS Mirror</title>
+<style>
+:root{font-family:system-ui,Arial,sans-serif;background:#101b2d;color:#eaf2ff;color-scheme:dark}
+*{box-sizing:border-box}body{max-width:475px;margin:0 auto;padding:16px 15px 36px}
+h1{font-size:22px;margin:7px 0 16px;font-weight:750;letter-spacing:.2px}
+.top{display:flex;gap:9px;align-items:center}.top input{flex:1;min-width:0}
+input{background:#25344b;color:white;border:1px solid #526986;border-radius:10px;padding:12px;font-size:16px;letter-spacing:1px}
+button{border:0;background:#354d6f;border-radius:12px;color:white;font-weight:700;font-size:16px;min-height:55px;touch-action:manipulation}
+button:active{background:#597cb0}.primary{background:#1d67ce;padding:12px 18px;min-height:44px}
+#status{margin:12px 0;color:#adc2dd;min-height:23px;font-size:13px}
+#screen{display:block;aspect-ratio:1;width:min(100%,350px);background:#070b11;border:6px solid #314258;border-radius:12px;margin:12px auto;image-rendering:pixelated}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:16px 4px}.grid .ok{background:#1864c1}
+.hint{text-align:center;color:#8fa6c8;font-size:12px;line-height:1.5}
+</style></head><body>
+<h1>iCopy-XS <span style="color:#75b7ff">Mirror</span></h1>
+<div class="top"><input id="token" type="text" inputmode="numeric" maxlength="6" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="6-digit PIN (optional)"><button id="connect" class="primary">Connect</button></div>
+<div id="status" role="status">Connect phone and iCopy-XS to the same Wi-Fi</div>
+<canvas id="screen" width="240" height="240"></canvas>
+<div class="grid"><button data-key="M1">M1</button><button data-key="UP">▲</button><button data-key="M2">M2</button><button data-key="LEFT">◀</button><button data-key="OK" class="ok">OK</button><button data-key="RIGHT">▶</button><button data-key="PWR">PWR</button><button data-key="DOWN">▼</button><button data-key="SRW">SRW</button></div>
+<div class="hint">PIN required for remote control.</div>
+<script>
+(()=>{
+ const ctx=document.getElementById('screen').getContext('2d',{alpha:false}),status=document.getElementById('status');
+ const token=document.getElementById('token'),button=document.getElementById('connect');
+ const fr={"Connect": "Connecter", "Disconnect": "Déconnecter", "Disconnected": "Déconnecté", "6-digit PIN (optional)": "PIN à 6 chiffres (facultatif)", "Connect phone and iCopy-XS to the same Wi-Fi": "Connectez le téléphone et iCopy-XS au même Wi-Fi", "PIN required for remote control.": "PIN requis pour le contrôle.", "Invalid frame": "Image incorrecte", "Frame: ": "Image : ", "Enter a 6-digit PIN": "Saisissez un PIN à 6 chiffres", "Connecting…": "Connexion…", "Unknown format": "Format inconnu", "Connected • screen and keys": "Connecté • écran et touches", "Connected • screen only": "Connecté • écran seul", "Connection: ": "Connexion : ", "Connect first": "Connectez d’abord", "Keys unavailable": "Touches indisponibles", "Key: ": "Touche : ", "Invalid PIN": "PIN incorrect", "Too many attempts": "Trop de tentatives", "Enter PIN": "Saisir le PIN"};
+ Object.assign(fr, {'Battery critical; mirror paused':'Batterie critique ; miroir en pause','Battery':'Batterie','Minimum':'Minimum','Battery unknown':'Batterie inconnue','Not charging':'Pas en charge','Charging reported':'Charge signalée'});
+ const french=navigator.language.toLowerCase().startsWith("fr"), t=x=>french?(fr[x]||x):x;
+ if(french) document.documentElement.lang="fr";
+ token.placeholder=t(token.placeholder); button.textContent=t(button.textContent); status.textContent=t(status.textContent); const hint=document.querySelector(".hint"); hint.textContent=t(hint.textContent);
+ let connected=false,controls=false,stop=false,etag="";
+ const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
+ async function get(path,method='GET',body=null){
+  const response=await fetch(path,{method,body,cache:'no-store',headers:{'X-Mirror-Token':token.value.trim().toUpperCase(),...(path==='/api/frame'&&etag?{'If-None-Match':etag}:{})},signal:AbortSignal.timeout(3000)});
+  if(response.status===403)throw Error(t('Invalid PIN'));
+  if(response.status===423){const level=response.headers.get('X-Battery-Level');throw Error(t('Battery critical; mirror paused')+' • '+(level&&level!=='unknown'?t('Battery')+': '+level+'%':t('Battery unknown'))+' • '+t('Minimum')+': 10%');}
+  if(response.status===429)throw Error(t('Too many attempts'));
+  if(response.status===304&&path==='/api/frame')return response;
+  if(!response.ok)throw Error('HTTP '+response.status);
+  return response;
+ }
+ async function frameLoop(){
+  while(connected&&!stop){
+   try{
+    const response=await get('/api/frame');
+    const level=response.headers.get('X-Battery-Level'), charging=response.headers.get('X-Battery-Charging');
+    status.textContent=(controls?t('Connected • screen and keys'):t('Connected • screen only'))+(level===null?'':level==='unknown'?' • '+t('Battery unknown'):' • '+t('Battery')+': '+level+'%'+(Number(level)<30?' ⚠':'')+(charging==='1'?' • '+t('Charging reported'):charging==='0'?' • '+t('Not charging'):''));
+    if(response.status===304){await sleep(200);continue;}
+    const decompressed=response.body.pipeThrough(new DecompressionStream('deflate'));
+    const bytes=new Uint8Array(await new Response(decompressed).arrayBuffer());
+    if(bytes.length!==115200)throw Error(t('Invalid frame'));
+    const image=ctx.createImageData(240,240),dest=image.data;
+    for(let i=0,j=0;i<bytes.length;i+=2,j+=4){
+      const rgb=bytes[i]|(bytes[i+1]<<8);
+      dest[j]=((rgb>>11)&31)*255/31;
+      dest[j+1]=((rgb>>5)&63)*255/63;
+      dest[j+2]=(rgb&31)*255/31;dest[j+3]=255;
+    }
+    ctx.putImageData(image,0,0); etag=response.headers.get('ETag')||'';
+   }catch(e){if(connected)status.textContent=t('Frame: ')+e.message;if(e.message.startsWith(t('Battery critical; mirror paused')))await sleep(1800);}
+   await sleep(200);
+  }
+ }
+ button.addEventListener('click',async()=>{
+  if(connected){connected=false;stop=true;button.textContent=t('Connect');status.textContent=t('Disconnected');return;}
+  if(token.value.trim() && !/^[0-9]{6}$/.test(token.value.trim())){status.textContent=t('Enter a 6-digit PIN');return;}
+  status.textContent=t('Connecting…');
+  try{
+   const auth=await (await get('/api/auth')).json();
+   if(auth.pin_required&&!token.value.trim())throw Error(t('Enter PIN'));
+   const info=await (await get('/api/info')).json();
+   if(info.width!==240||info.height!==240||info.pixel_format!=='rgb565le')throw Error(t('Unknown format'));
+   etag="";controls=!!info.keys_enabled;connected=true;stop=false;button.textContent=t('Disconnect');
+   status.textContent=controls?t('Connected • screen and keys'):t('Connected • screen only');
+   frameLoop();
+  }catch(e){status.textContent=t('Connection: ')+e.message;}
+ });
+ document.querySelectorAll('[data-key]').forEach(el=>el.addEventListener('click',async()=>{
+  if(!connected){status.textContent=t('Connect first');return;}
+  if(!controls){status.textContent=t('Keys unavailable');return;}
+  try{await get('/api/key','POST',el.dataset.key);}catch(e){status.textContent=t('Key: ')+e.message;}
+ }));
+})();
+</script>
+</body></html>
