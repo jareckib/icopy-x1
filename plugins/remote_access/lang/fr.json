@@ -243,7 +243,7 @@
   "Connect": "Connecter",
   "Use SSH on phone": "SSH sur téléphone",
   "Eject disk on PC": "Éjecter disque du PC",
-  "Unplug USB cable": "Débrancher câble USB",
+  "Unplug USB cable": "Débranchez le câble",
   "Cable disconnected?": "Câble débranché ?",
   "Connect phone first": "Connecter le tel.",
   "Restart USB service": "Relancer USB",
@@ -257,5 +257,8 @@
   "wpa_cli %s failed": "Échec wpa_cli %s",
   "Framebuffer narrower than screen": "Framebuffer trop étroit",
   "Mirror stopped": "Miroir arrêté",
-  "Specific local address required": "IP locale requise"
+  "Specific local address required": "IP locale requise",
+  "from iCopy-X.": "USB de l'iCopy-X.",
+  "Confirm to start": "Confirmez pour lancer",
+  "USB Serial.": "USB série."
 }

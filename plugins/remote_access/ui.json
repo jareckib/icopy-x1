@@ -1116,22 +1116,22 @@
           "type": "text",
           "lines": [
             {
-              "text": "Eject disk on PC",
-              "size": "medium",
-              "align": "center"
-            },
-            {
               "text": "Unplug USB cable",
               "size": "medium",
               "align": "center"
             },
             {
-              "text": "Cable disconnected?",
+              "text": "from iCopy-X.",
               "size": "medium",
               "align": "center"
             },
             {
-              "text": "OK - Confirm",
+              "text": "Confirm to start",
+              "size": "medium",
+              "align": "center"
+            },
+            {
+              "text": "USB Serial.",
               "size": "medium",
               "align": "center"
             }

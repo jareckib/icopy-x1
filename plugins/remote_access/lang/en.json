@@ -257,5 +257,8 @@
   "wpa_cli %s failed": "wpa_cli %s failed",
   "Framebuffer narrower than screen": "Framebuffer narrower than screen",
   "Mirror stopped": "Mirror stopped",
-  "Specific local address required": "Specific local address required"
+  "Specific local address required": "Specific local address required",
+  "from iCopy-X.": "from iCopy-X.",
+  "Confirm to start": "Confirm to start",
+  "USB Serial.": "USB Serial."
 }
